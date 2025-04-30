@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { DataTable } from '@/components/DataTable'
-import { CardView } from '@/components/CardView'
 import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
 import { ItemCard } from '@/components/ItemCard'
@@ -20,8 +19,16 @@ import {
   MapPinIcon,
   EnvelopeIcon,
   ArrowLeftIcon,
+  AdjustmentsHorizontalIcon,
+  PhoneIcon,
+  BriefcaseIcon,
+  GlobeAltIcon,
+  ViewColumnsIcon,
+  Bars3Icon,
 } from '@heroicons/react/24/outline'
 import { Icon } from '@/components/Icon'
+import debounce from 'lodash/debounce'
+import { createSwapy } from 'swapy'
 
 // Helper function to fetch all records using pagination
 async function fetchAllRecords<T>(
@@ -56,6 +63,8 @@ async function fetchAllRecords<T>(
   return allData;
 }
 
+type ColumnType = ColumnDef<Attendee> | ColumnDef<HealthSystem> | ColumnDef<Conference>;
+
 export default function Home() {
   const [view, setView] = useState<'table' | 'cards'>('cards')
   const [attendees, setAttendees] = useState<Attendee[]>([])
@@ -71,6 +80,95 @@ export default function Home() {
     states: [],
     conferences: [],
   })
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, string[]>>({
+    attendees: ['name', 'email', 'phone', 'title', 'company'],
+    'health-systems': ['name', 'location', 'website'],
+    conferences: ['name', 'date', 'location'],
+  })
+  const [searchQuery, setSearchQuery] = useState('');
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  const swapyRef = useRef<ReturnType<typeof createSwapy> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [localSearchQuery, setLocalSearchQuery] = useState('');
+
+  // Table columns with visibility control
+  const attendeeColumns: ColumnDef<Attendee>[] = [
+    {
+      id: 'name',
+      header: 'Name',
+      accessorFn: (row) => `${row.first_name} ${row.last_name}`,
+    },
+    { id: 'email', header: 'Email', accessorKey: 'email' },
+    { id: 'phone', header: 'Phone', accessorKey: 'phone' },
+    { id: 'title', header: 'Title', accessorKey: 'title' },
+    { id: 'company', header: 'Company', accessorKey: 'company' },
+  ]
+
+  const healthSystemColumns: ColumnDef<HealthSystem>[] = [
+    { id: 'name', header: 'Name', accessorKey: 'name' },
+    { id: 'location', header: 'Location', accessorFn: (row) => `${row.city || ''}, ${row.state || ''}` },
+    { id: 'website', header: 'Website', accessorKey: 'website' },
+  ]
+
+  const conferenceColumns: ColumnDef<Conference>[] = [
+    { id: 'name', header: 'Name', accessorKey: 'name' },
+    { 
+      id: 'date',
+      header: 'Date', 
+      accessorFn: (row) => {
+        if (!row.start_date) return ''
+        const start = new Date(row.start_date).toLocaleDateString()
+        const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null
+        return end ? `${start} - ${end}` : start
+      }
+    },
+    { id: 'location', header: 'Location', accessorKey: 'location' },
+  ]
+
+  // Get all available columns for current tab
+  const getAllColumns = useMemo(() => {
+    switch (activeTab) {
+      case 'attendees':
+        return attendeeColumns
+      case 'health-systems':
+        return healthSystemColumns
+      case 'conferences':
+        return conferenceColumns
+      default:
+        return []
+    }
+  }, [activeTab]);
+
+  // Memoize the debounced search function
+  const debouncedSetSearch = useMemo(
+    () => debounce((value: string) => {
+      setSearchQuery(value);
+    }, 300),
+    []
+  );
+
+  // Memoize the base columns
+  const baseColumns = useMemo(() => getAllColumns, [getAllColumns]);
+
+  // Memoize ordered columns before filtering
+  const orderedColumns = useMemo(() => {
+    if (columnOrder.length === 0) return baseColumns;
+    return columnOrder
+      .map(id => baseColumns.find(col => col.id === id))
+      .filter((col): col is ColumnType => Boolean(col));
+  }, [baseColumns, columnOrder]);
+
+  // Memoize filtered columns
+  const filteredColumns = useMemo(() => {
+    if (!searchQuery) return orderedColumns;
+    
+    const lowerQuery = searchQuery.toLowerCase();
+    return orderedColumns.filter((column): column is ColumnType => {
+      if (!column || !column.header) return false;
+      const headerStr = String(column.header).toLowerCase();
+      return headerStr.includes(lowerQuery) && column.id !== 'name';
+    });
+  }, [orderedColumns, searchQuery]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -110,11 +208,6 @@ export default function Home() {
     const titles = Array.from(new Set(attendees.map(a => a.title).filter(Boolean)))
     return titles.map(title => ({ id: title as string, name: title as string }))
   }, [attendees])
-
-  const stateOptions = useMemo(() => {
-    const states = Array.from(new Set(healthSystems.map(hs => hs.state).filter(Boolean)))
-    return states.map(state => ({ id: state as string, name: state as string }))
-  }, [healthSystems])
 
   // Filtered data
   const filteredAttendees = useMemo(() => {
@@ -156,37 +249,38 @@ export default function Home() {
     })
   }, [conferences, searchTerm])
 
-  // Table columns
-  const attendeeColumns: ColumnDef<Attendee>[] = [
-    {
-      header: 'Name',
-      accessorFn: (row) => `${row.first_name} ${row.last_name}`,
-    },
-    { header: 'Email', accessorKey: 'email' },
-    { header: 'Phone', accessorKey: 'phone' },
-    { header: 'Title', accessorKey: 'title' },
-    { header: 'Company', accessorKey: 'company' },
-  ]
+  // Get visible columns for current tab
+  const getVisibleColumns = () => {
+    const currentVisibleColumns = visibleColumns[activeTab];
+    // Always include the name column if it exists
+    const nameColumn = getAllColumns.find((col: ColumnType) => col.id === 'name');
+    const visibleColumnsWithName = nameColumn 
+      ? [nameColumn, ...getAllColumns.filter((col: ColumnType) => col.id !== 'name' && currentVisibleColumns.includes(col.id as string))]
+      : getAllColumns.filter((col: ColumnType) => currentVisibleColumns.includes(col.id as string));
 
-  const healthSystemColumns: ColumnDef<HealthSystem>[] = [
-    { header: 'Name', accessorKey: 'name' },
-    { header: 'Location', accessorFn: (row) => `${row.city || ''}, ${row.state || ''}` },
-    { header: 'Website', accessorKey: 'website' },
-  ]
+    switch (activeTab) {
+      case 'attendees':
+        return visibleColumnsWithName as ColumnDef<Attendee>[];
+      case 'health-systems':
+        return visibleColumnsWithName as ColumnDef<HealthSystem>[];
+      case 'conferences':
+        return visibleColumnsWithName as ColumnDef<Conference>[];
+      default:
+        return [];
+    }
+  }
 
-  const conferenceColumns: ColumnDef<Conference>[] = [
-    { header: 'Name', accessorKey: 'name' },
-    { 
-      header: 'Date', 
-      accessorFn: (row) => {
-        if (!row.start_date) return ''
-        const start = new Date(row.start_date).toLocaleDateString()
-        const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null
-        return end ? `${start} - ${end}` : start
-      }
-    },
-    { header: 'Location', accessorKey: 'location' },
-  ]
+  // Handle column visibility toggle
+  const handleColumnToggle = (columnId: string) => {
+    if (columnId === 'name') return; // Prevent toggling the name column
+    
+    setVisibleColumns(prev => ({
+      ...prev,
+      [activeTab]: prev[activeTab].includes(columnId)
+        ? prev[activeTab].filter(id => id !== columnId)
+        : [...prev[activeTab], columnId]
+    }))
+  }
 
   const handleSearch = (term: string) => {
     setSearchTerm(term)
@@ -237,76 +331,120 @@ export default function Home() {
   }
 
   const renderCardView = () => {
-    switch (activeTab) {
-      case 'attendees':
-        return (
-          <CardView
-            items={filteredAttendees}
-            renderCard={(attendee) => (
-              <ItemCard
-                title={`${attendee.first_name} ${attendee.last_name}`}
-                subtitle={attendee.title}
-                icon={<Icon icon={UserIcon} size="sm" className="text-primary-600" />}
-                tags={[
-                  ...(attendee.company ? [{ text: attendee.company, color: 'gray' as const }] : []),
-                ]}
-                onClick={() => setSelectedItem(attendee)}
-              >
-                {attendee.email && (
-                  <p className="flex items-center mt-2 text-gray-500">
-                    <Icon icon={EnvelopeIcon} size="xs" className="mr-2 text-gray-400" />
-                    {attendee.email}
-                  </p>
-                )}
-              </ItemCard>
-            )}
-          />
-        )
-      case 'health-systems':
-        return (
-          <CardView
-            items={filteredHealthSystems}
-            renderCard={(system) => (
-              <ItemCard
-                title={system.name}
-                subtitle={[system.city, system.state].filter(Boolean).join(', ')}
-                icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-accent-600" />}
-                tags={system.state ? [{ text: system.state, color: 'accent' as const }] : []}
-                onClick={() => setSelectedItem(system)}
-              />
-            )}
-          />
-        )
-      case 'conferences':
-        return (
-          <CardView
-            items={filteredConferences}
-            renderCard={(conference) => (
-              <ItemCard
-                title={conference.name}
-                subtitle={conference.location}
-                icon={<Icon icon={CalendarIcon} size="sm" className="text-secondary-600" />}
-                tags={[
-                  {
-                    text: conference.start_date 
-                      ? new Date(conference.start_date).toLocaleDateString()
-                      : 'No date',
-                    color: 'secondary' as const
-                  }
-                ]}
-                onClick={() => setSelectedItem(conference)}
-              >
-                {conference.location && (
-                  <p className="flex items-center mt-2 text-gray-500">
-                    <Icon icon={MapPinIcon} size="xs" className="mr-2 text-gray-400" />
-                    {conference.location}
-                  </p>
-                )}
-              </ItemCard>
-            )}
-          />
-        )
+    const getVisibleFields = (item: Attendee | HealthSystem | Conference) => {
+      const fields: { label: string; value: string; icon: React.ReactNode }[] = [];
+      const visibleColumnIds = visibleColumns[activeTab];
+
+      columnOrder.forEach(id => {
+        if (id === 'name') return; // Skip name field
+        if (!visibleColumnIds.includes(id)) return;
+
+        const column = getAllColumns.find((col: ColumnType) => col.id === id);
+        if (!column) return;
+
+        let value = '';
+        if ('accessorKey' in column && column.accessorKey) {
+          const key = column.accessorKey as keyof (Attendee | HealthSystem | Conference);
+          value = String(item[key] || '');
+        } else if ('accessorFn' in column) {
+          // Type guard for different item types
+          if ('first_name' in item) {
+            value = String((column as any).accessorFn(item as Attendee) || '');
+          } else if ('start_date' in item) {
+            value = String((column as any).accessorFn(item as Conference) || '');
+          } else {
+            value = String((column as any).accessorFn(item as HealthSystem) || '');
+          }
+        }
+
+        fields.push({
+          label: String(column.header),
+          value: value,
+          icon: getColumnIcon(String(column.id))
+        });
+      });
+
+      return fields;
+    };
+
+    if (activeTab === 'attendees') {
+      return filteredAttendees.map((attendee) => (
+        <ItemCard
+          key={attendee.id}
+          title={`${attendee.first_name} ${attendee.last_name}`}
+          icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
+          onClick={() => setSelectedItem(attendee)}
+        >
+          <div className="space-y-2">
+            {getVisibleFields(attendee).map((field, index) => (
+              <div key={index} className="flex items-start">
+                <div className="flex items-center min-w-[100px] text-gray-500">
+                  <div className="w-5 h-5 mr-2">
+                    {field.icon}
+                  </div>
+                  <span>{field.label}:</span>
+                </div>
+                <span className="text-gray-900 ml-2">{field.value}</span>
+              </div>
+            ))}
+          </div>
+        </ItemCard>
+      ));
     }
+
+    if (activeTab === 'health-systems') {
+      return filteredHealthSystems.map((healthSystem) => (
+        <ItemCard
+          key={healthSystem.id}
+          title={healthSystem.name}
+          subtitle={`${healthSystem.city}, ${healthSystem.state}`}
+          icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
+          onClick={() => setSelectedItem(healthSystem)}
+        >
+          <div className="space-y-2">
+            {getVisibleFields(healthSystem).map((field, index) => (
+              <div key={index} className="flex items-start">
+                <div className="flex items-center min-w-[100px] text-gray-500">
+                  <div className="w-5 h-5 mr-2">
+                    {field.icon}
+                  </div>
+                  <span>{field.label}:</span>
+                </div>
+                <span className="text-gray-900 ml-2">{field.value}</span>
+              </div>
+            ))}
+          </div>
+        </ItemCard>
+      ));
+    }
+
+    if (activeTab === 'conferences') {
+      return filteredConferences.map((conference) => (
+        <ItemCard
+          key={conference.id}
+          title={conference.name}
+          subtitle={conference.location}
+          icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
+          onClick={() => setSelectedItem(conference)}
+        >
+          <div className="space-y-2">
+            {getVisibleFields(conference).map((field, index) => (
+              <div key={index} className="flex items-start">
+                <div className="flex items-center min-w-[100px] text-gray-500">
+                  <div className="w-5 h-5 mr-2">
+                    {field.icon}
+                  </div>
+                  <span>{field.label}:</span>
+                </div>
+                <span className="text-gray-900 ml-2">{field.value}</span>
+              </div>
+            ))}
+          </div>
+        </ItemCard>
+      ));
+    }
+
+    return null;
   }
 
   const renderContent = () => {
@@ -334,7 +472,7 @@ export default function Home() {
             onClick={() => setSelectedItem(null)}
             className="inline-flex items-center text-gray-600 hover:text-gray-900 transition-colors"
           >
-            <Icon icon={ArrowLeftIcon} size="xs" className="mr-1" />
+            <Icon icon={ArrowLeftIcon} size="xs" className="mr-1 text-gray-400" />
             Back to list
           </button>
           
@@ -345,38 +483,58 @@ export default function Home() {
 
     return (
       <div className="space-y-6 animate-fade-in">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-40">
           <SearchBar 
             placeholder={`Search ${activeTab}...`}
             onSearch={handleSearch}
           />
           
-          <div className="flex flex-wrap gap-2">
-            {activeTab === 'attendees' && (
-              <FilterMenu
-                title="Title"
-                options={titleOptions}
-                selectedValues={selectedFilters.titles}
-                onChange={(values) => handleFilterChange('titles', values)}
-              />
-            )}
+          <div className="flex items-center gap-4 relative z-40">
+            <FilterMenu
+              title="Title"
+              options={titleOptions}
+              selectedValues={selectedFilters.titles}
+              onChange={(values) => handleFilterChange('titles', values)}
+            />
             
-            {activeTab === 'health-systems' && (
-              <FilterMenu
-                title="State"
-                options={stateOptions}
-                selectedValues={selectedFilters.states}
-                onChange={(values) => handleFilterChange('states', values)}
-              />
-            )}
+            <div className="relative">
+              <button
+                onClick={() => document.getElementById('column-menu')?.classList.toggle('hidden')}
+                className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
+              >
+                <Icon icon={AdjustmentsHorizontalIcon} size="xs" className="mr-2" />
+                Properties
+              </button>
+              <div
+                id="column-menu"
+                className="hidden absolute right-0 mt-2 w-72 rounded-md bg-white border border-gray-200 shadow-lg z-50"
+              >
+                <div className="p-4">
+                  <div className="relative mb-4">
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      placeholder="Search for a property..."
+                      value={localSearchQuery}
+                      onChange={handleSearchChange}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    {renderPropertiesList()}
+                  </div>
+                </div>
+              </div>
+            </div>
             
-            <div className="flex items-center space-x-2 ml-auto">
+            <div className="flex items-center space-x-2 relative z-40">
               <button
                 onClick={() => setView('table')}
                 className={`p-2 rounded-md ${
                   view === 'table'
                     ? 'bg-primary-100 text-primary-700'
-                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
                 } transition-colors`}
                 aria-label="Table view"
               >
@@ -390,7 +548,7 @@ export default function Home() {
                 className={`p-2 rounded-md ${
                   view === 'cards'
                     ? 'bg-primary-100 text-primary-700'
-                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
                 } transition-colors`}
                 aria-label="Card view"
               >
@@ -405,9 +563,9 @@ export default function Home() {
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
             {[
-              { id: 'attendees', label: 'Attendees', count: filteredAttendees.length, icon: <Icon icon={UserIcon} size="xs" className="mr-1.5" /> },
-              { id: 'health-systems', label: 'Health Systems', count: filteredHealthSystems.length, icon: <Icon icon={BuildingOfficeIcon} size="xs" className="mr-1.5" /> },
-              { id: 'conferences', label: 'Conferences', count: filteredConferences.length, icon: <Icon icon={CalendarIcon} size="xs" className="mr-1.5" /> },
+              { id: 'attendees', label: 'Attendees', count: filteredAttendees.length },
+              { id: 'health-systems', label: 'Health Systems', count: filteredHealthSystems.length },
+              { id: 'conferences', label: 'Conferences', count: filteredConferences.length },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -421,7 +579,9 @@ export default function Home() {
                   } transition-colors
                 `}
               >
-                {tab.icon}
+                {tab.id === 'attendees' && <Icon icon={UserIcon} size="xs" className="mr-1.5 text-gray-400" />}
+                {tab.id === 'health-systems' && <Icon icon={BuildingOfficeIcon} size="xs" className="mr-1.5 text-gray-400" />}
+                {tab.id === 'conferences' && <Icon icon={CalendarIcon} size="xs" className="mr-1.5 text-gray-400" />}
                 {tab.label}
                 <span className={`
                   ml-1.5 py-0.5 px-2 rounded-full text-xs font-medium
@@ -437,37 +597,202 @@ export default function Home() {
         {view === 'table' ? (
           <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-100">
             {activeTab === 'attendees' && (
-              <DataTable
+              <DataTable<Attendee>
                 data={filteredAttendees}
-                columns={attendeeColumns}
+                columns={getVisibleColumns() as ColumnDef<Attendee>[]}
                 onRowClick={setSelectedItem}
               />
             )}
             
             {activeTab === 'health-systems' && (
-              <DataTable
+              <DataTable<HealthSystem>
                 data={filteredHealthSystems}
-                columns={healthSystemColumns}
+                columns={getVisibleColumns() as ColumnDef<HealthSystem>[]}
                 onRowClick={setSelectedItem}
               />
             )}
             
             {activeTab === 'conferences' && (
-              <DataTable
+              <DataTable<Conference>
                 data={filteredConferences}
-                columns={conferenceColumns}
+                columns={getVisibleColumns() as ColumnDef<Conference>[]}
                 onRowClick={setSelectedItem}
               />
             )}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 relative z-0">
             {renderCardView()}
           </div>
         )}
       </div>
     )
   }
+
+  const getColumnIcon = (columnId: string) => {
+    switch (columnId) {
+      case 'name':
+        return <Icon icon={UserIcon} size="sm" className="text-gray-400" />;
+      case 'email':
+        return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />;
+      case 'phone':
+        return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />;
+      case 'title':
+        return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />;
+      case 'company':
+        return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />;
+      case 'location':
+        return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />;
+      case 'website':
+        return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />;
+      case 'date':
+        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />;
+      default:
+        return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />;
+    }
+  };
+
+  // Initialize column order
+  useEffect(() => {
+    const initialOrder = getAllColumns.map((col: ColumnType) => col.id as string);
+    setColumnOrder(initialOrder);
+  }, [activeTab, getAllColumns]);
+
+  // Update the properties list rendering with drag handle and sections
+  const renderPropertiesList = () => {
+    const shownColumns = filteredColumns.filter(column => 
+      column.id === 'name' || visibleColumns[activeTab].includes(String(column.id))
+    );
+    const hiddenColumns = filteredColumns.filter(column => 
+      column.id !== 'name' && !visibleColumns[activeTab].includes(String(column.id))
+    );
+
+    const viewText = view === 'cards' ? 'Card' : 'Table';
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <div className="text-sm font-medium text-gray-700 mb-2">
+            Shown in {viewText}
+          </div>
+          <div id="shown-properties-list" className="space-y-1">
+            {shownColumns.map((column) => {
+              const isNameColumn = column.id === 'name';
+              const icon = getColumnIcon(String(column.id));
+              return (
+                <div
+                  key={String(column.id)}
+                  data-swapy-slot={String(column.id)}
+                  className="mb-1"
+                >
+                  <div
+                    data-swapy-item={String(column.id)}
+                    className={`flex items-center px-3 py-2 rounded-lg hover:bg-gray-50 ${isNameColumn ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex items-center flex-1 min-w-0">
+                      <div 
+                        className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400 cursor-grab"
+                      >
+                        <Icon icon={Bars3Icon} size="sm" />
+                      </div>
+                      <div className="flex items-center justify-center w-6 h-6 mr-3">
+                        {icon}
+                      </div>
+                      <span className="text-sm text-gray-900 truncate">
+                        {String(column.header)}
+                      </span>
+                    </div>
+                    <div className="ml-3 flex items-center h-5">
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        onChange={() => !isNameColumn && handleColumnToggle(String(column.id))}
+                        disabled={isNameColumn}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {hiddenColumns.length > 0 && (
+          <div>
+            <div className="text-sm font-medium text-gray-700 mb-2">
+              Not Shown in {viewText}
+            </div>
+            <div id="hidden-properties-list" className="space-y-1">
+              {hiddenColumns.map((column) => {
+                const icon = getColumnIcon(String(column.id));
+                return (
+                  <div
+                    key={String(column.id)}
+                    className="mb-1"
+                  >
+                    <div
+                      className="flex items-center px-3 py-2 rounded-lg hover:bg-gray-50"
+                    >
+                      <div className="flex items-center flex-1 min-w-0">
+                        <div 
+                          className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400"
+                        >
+                          <Icon icon={Bars3Icon} size="sm" />
+                        </div>
+                        <div className="flex items-center justify-center w-6 h-6 mr-3">
+                          {icon}
+                        </div>
+                        <span className="text-sm text-gray-900 truncate">
+                          {String(column.header)}
+                        </span>
+                      </div>
+                      <div className="ml-3 flex items-center h-5">
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          onChange={() => handleColumnToggle(String(column.id))}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Update Swapy initialization to use basic setup
+  useEffect(() => {
+    const container = document.querySelector('#shown-properties-list') as HTMLElement;
+    if (!container) return;
+
+    swapyRef.current = createSwapy(container);
+
+    swapyRef.current.onSwap(() => {
+      const newOrder = Array.from(container.querySelectorAll('[data-swapy-item]'))
+        .map(item => item.getAttribute('data-swapy-item'))
+        .filter((id): id is string => id !== null);
+      setColumnOrder(newOrder);
+    });
+
+    return () => {
+      if (swapyRef.current) {
+        swapyRef.current.destroy();
+      }
+    };
+  }, [activeTab, view]);
+
+  // Handle search input change with local state
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setLocalSearchQuery(value);
+    debouncedSetSearch(value);
+  };
 
   return (
     <main className="min-h-screen bg-gray-50">
