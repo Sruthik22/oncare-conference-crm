@@ -7,7 +7,7 @@ import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
 import { ItemCard } from '@/components/ItemCard'
 import { supabase } from '@/lib/supabase'
-import type { Attendee, HealthSystem, Conference, AttendeeConference } from '@/types'
+import type { Attendee, HealthSystem, Conference } from '@/types'
 import { ColumnDef } from '@tanstack/react-table'
 import { 
   UserIcon, 

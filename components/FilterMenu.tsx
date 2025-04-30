@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment } from 'react'
 import { Menu, Transition } from '@headlessui/react'
 import { FunnelIcon, CheckIcon } from '@heroicons/react/24/outline'
 

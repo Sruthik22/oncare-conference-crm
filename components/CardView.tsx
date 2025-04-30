@@ -1,6 +1,3 @@
-import { clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
 interface CardViewProps<T> {
   items: T[]
   renderCard: (item: T) => React.ReactNode
