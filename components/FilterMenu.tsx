@@ -1,95 +1,237 @@
-import { Fragment } from 'react'
-import { Menu, Transition } from '@headlessui/react'
-import { FunnelIcon, CheckIcon } from '@heroicons/react/24/outline'
+import { useState } from 'react'
+import { Icon } from './Icon'
+import { 
+  FunnelIcon,
+  XMarkIcon,
+  PlusIcon,
+  UserIcon,
+  BuildingOfficeIcon,
+  CalendarIcon,
+  MapPinIcon,
+  EnvelopeIcon,
+  PhoneIcon,
+  BriefcaseIcon,
+  GlobeAltIcon,
+} from '@heroicons/react/24/outline'
 
-interface FilterOption {
+type FilterOperator = 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
+
+interface Filter {
   id: string
-  name: string
+  property: string
+  operator: FilterOperator
+  value: string
 }
 
 interface FilterMenuProps {
-  title: string
-  options: FilterOption[]
-  selectedValues: string[]
-  onChange: (selectedValues: string[]) => void
+  columns: Array<{
+    id: string
+    header: string
+  }>
+  onFilterChange: (filters: Filter[]) => void
+  isOpen: boolean
+  onToggle: () => void
 }
 
-export function FilterMenu({ title, options, selectedValues, onChange }: FilterMenuProps) {
-  const toggleOption = (optionId: string) => {
-    if (selectedValues.includes(optionId)) {
-      onChange(selectedValues.filter(id => id !== optionId))
-    } else {
-      onChange([...selectedValues, optionId])
+export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: FilterMenuProps) {
+  const [filters, setFilters] = useState<Filter[]>([])
+  const [activeFilter, setActiveFilter] = useState<Filter | null>(null)
+
+  const addFilter = () => {
+    const newFilter: Filter = {
+      id: Math.random().toString(36).substr(2, 9),
+      property: columns[0]?.id || '',
+      operator: 'equals',
+      value: ''
+    }
+    setFilters([...filters, newFilter])
+    setActiveFilter(newFilter)
+  }
+
+  const removeFilter = (id: string) => {
+    const newFilters = filters.filter(f => f.id !== id)
+    setFilters(newFilters)
+    onFilterChange(newFilters)
+  }
+
+  const updateFilter = (id: string, updates: Partial<Filter>) => {
+    const newFilters = filters.map(f => 
+      f.id === id ? { ...f, ...updates } : f
+    )
+    setFilters(newFilters)
+    onFilterChange(newFilters)
+  }
+
+  const getOperatorOptions = (property: string) => {
+    const column = columns.find(c => c.id === property)
+    if (!column) return []
+
+    // Text-based operators
+    if (['name', 'email', 'title', 'company', 'location'].includes(property)) {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'contains', label: 'Contains' },
+        { value: 'starts_with', label: 'Starts with' },
+        { value: 'ends_with', label: 'Ends with' },
+        { value: 'is_empty', label: 'Is empty' },
+        { value: 'is_not_empty', label: 'Is not empty' },
+      ]
+    }
+
+    // Date-based operators
+    if (['date'].includes(property)) {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'greater_than', label: 'After' },
+        { value: 'less_than', label: 'Before' },
+        { value: 'is_empty', label: 'Is empty' },
+        { value: 'is_not_empty', label: 'Is not empty' },
+      ]
+    }
+
+    // Default operators
+    return [
+      { value: 'equals', label: 'Equals' },
+      { value: 'is_empty', label: 'Is empty' },
+      { value: 'is_not_empty', label: 'Is not empty' },
+    ]
+  }
+
+  const getColumnIcon = (columnId: string) => {
+    switch (columnId) {
+      case 'name':
+        return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
+      case 'email':
+        return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
+      case 'phone':
+        return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />
+      case 'title':
+        return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />
+      case 'company':
+        return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
+      case 'location':
+        return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
+      case 'website':
+        return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
+      case 'date':
+        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+      default:
+        return <Icon icon={FunnelIcon} size="sm" className="text-gray-400" />
     }
   }
 
   return (
-    <Menu as="div" className="relative inline-block text-left">
-      <div>
-        <Menu.Button className="flex items-center space-x-2 py-2.5 px-4 border border-gray-200 rounded-lg
-                              text-sm font-medium text-gray-700 bg-white hover:bg-gray-50
-                              transition-colors duration-200">
-          <FunnelIcon className="h-4 w-4 text-gray-500" />
-          <span>{title}</span>
-          {selectedValues.length > 0 && (
-            <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
-              {selectedValues.length}
-            </span>
-          )}
-        </Menu.Button>
-      </div>
-
-      <Transition
-        as={Fragment}
-        enter="transition ease-out duration-100"
-        enterFrom="transform opacity-0 scale-95"
-        enterTo="transform opacity-100 scale-100"
-        leave="transition ease-in duration-75"
-        leaveFrom="transform opacity-100 scale-100"
-        leaveTo="transform opacity-0 scale-95"
+    <div className="relative">
+      <button
+        onClick={onToggle}
+        className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none menu-button"
       >
-        <Menu.Items className="absolute right-0 z-10 mt-2 w-56 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-          <div className="p-2">
-            <div className="px-3 py-2 border-b border-gray-100">
-              <h3 className="text-sm font-medium text-gray-900">{title}</h3>
+        <Icon icon={FunnelIcon} size="xs" className="mr-2" />
+        Filter
+        {filters.length > 0 && (
+          <span className="ml-2 w-5 h-5 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-xs font-medium">
+            {filters.length}
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-80 rounded-md bg-white border border-gray-200 shadow-lg z-50 menu-content">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-medium text-gray-900">Filters</h3>
+              <button
+                onClick={onToggle}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <Icon icon={XMarkIcon} size="sm" />
+              </button>
             </div>
-            <div className="py-1 max-h-60 overflow-y-auto">
-              {options.length === 0 ? (
-                <div className="px-4 py-2 text-sm text-gray-500">No options available</div>
-              ) : (
-                options.map((option) => (
-                  <Menu.Item key={option.id}>
-                    {({ active }) => (
-                      <button
-                        onClick={() => toggleOption(option.id)}
-                        className={`
-                          flex items-center justify-between w-full px-4 py-2 text-sm rounded-md
-                          ${active ? 'bg-primary-50 text-primary-900' : 'text-gray-700'}
-                        `}
-                      >
-                        <span>{option.name}</span>
-                        {selectedValues.includes(option.id) && (
-                          <CheckIcon className="h-4 w-4 text-primary-600" />
-                        )}
-                      </button>
-                    )}
-                  </Menu.Item>
-                ))
-              )}
-            </div>
-            {selectedValues.length > 0 && (
-              <div className="px-3 py-2 border-t border-gray-100">
-                <button
-                  onClick={() => onChange([])}
-                  className="text-xs text-primary-600 hover:text-primary-800 font-medium"
+
+            <div className="space-y-3">
+              {filters.map((filter) => (
+                <div
+                  key={filter.id}
+                  className={`p-3 rounded-lg border ${
+                    activeFilter?.id === filter.id
+                      ? 'border-primary-500 bg-primary-50'
+                      : 'border-gray-200'
+                  }`}
                 >
-                  Clear all filters
-                </button>
-              </div>
-            )}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="relative w-full">
+                      <select
+                        value={filter.property}
+                        onChange={(e) => updateFilter(filter.id, { property: e.target.value })}
+                        className="block w-full pl-10 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
+                      >
+                        {columns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.header}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        {getColumnIcon(filter.property)}
+                      </div>
+                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                        <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeFilter(filter.id)}
+                      className="ml-2 text-gray-400 hover:text-gray-500"
+                    >
+                      <Icon icon={XMarkIcon} size="sm" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col space-y-2">
+                    <div className="relative">
+                      <select
+                        value={filter.operator}
+                        onChange={(e) => updateFilter(filter.id, { operator: e.target.value as FilterOperator })}
+                        className="block w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
+                      >
+                        {getOperatorOptions(filter.property).map((op) => (
+                          <option key={op.value} value={op.value}>
+                            {op.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                        <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {!['is_empty', 'is_not_empty'].includes(filter.operator) && (
+                      <input
+                        type="text"
+                        value={filter.value}
+                        onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                        placeholder="Value"
+                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={addFilter}
+                className="w-full flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
+              >
+                <Icon icon={PlusIcon} size="xs" className="mr-2" />
+                Add filter
+              </button>
+            </div>
           </div>
-        </Menu.Items>
-      </Transition>
-    </Menu>
+        </div>
+      )}
+    </div>
   )
 } 

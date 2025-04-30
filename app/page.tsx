@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { DataTable } from '@/components/DataTable'
 import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
@@ -10,7 +10,7 @@ import { ConferenceDetail } from '@/components/ConferenceDetail'
 import { HealthSystemDetail } from '@/components/HealthSystemDetail'
 import { supabase } from '@/lib/supabase'
 import type { Attendee, HealthSystem, Conference } from '@/types'
-import { ColumnDef } from '@tanstack/react-table'
+import { ColumnDef, CellContext } from '@tanstack/react-table'
 import Image from 'next/image'
 import { 
   UserIcon, 
@@ -19,16 +19,14 @@ import {
   MapPinIcon,
   EnvelopeIcon,
   ArrowLeftIcon,
-  AdjustmentsHorizontalIcon,
   PhoneIcon,
   BriefcaseIcon,
   GlobeAltIcon,
   ViewColumnsIcon,
-  Bars3Icon,
+  Cog6ToothIcon,
 } from '@heroicons/react/24/outline'
 import { Icon } from '@/components/Icon'
-import debounce from 'lodash/debounce'
-import { createSwapy } from 'swapy'
+import { PropertiesMenu } from '@/components/PropertiesMenu'
 
 // Helper function to fetch all records using pagination
 async function fetchAllRecords<T>(
@@ -63,10 +61,10 @@ async function fetchAllRecords<T>(
   return allData;
 }
 
-type ColumnType = ColumnDef<Attendee> | ColumnDef<HealthSystem> | ColumnDef<Conference>;
-
 export default function Home() {
   const [view, setView] = useState<'table' | 'cards'>('cards')
+  const [columnsPerRow, setColumnsPerRow] = useState(3)
+  const [activeMenu, setActiveMenu] = useState<'filter' | 'properties' | 'view-settings' | null>(null)
   const [attendees, setAttendees] = useState<Attendee[]>([])
   const [healthSystems, setHealthSystems] = useState<HealthSystem[]>([])
   const [conferences, setConferences] = useState<Conference[]>([])
@@ -75,24 +73,21 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'attendees' | 'health-systems' | 'conferences'>('attendees')
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedFilters, setSelectedFilters] = useState<Record<string, string[]>>({
-    titles: [],
-    states: [],
-    conferences: [],
-  })
+  const [activeFilters, setActiveFilters] = useState<Array<{
+    id: string
+    property: string
+    operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
+    value: string
+  }>>([])
   const [visibleColumns, setVisibleColumns] = useState<Record<string, string[]>>({
     attendees: ['name', 'email', 'phone', 'title', 'company'],
     'health-systems': ['name', 'location', 'website'],
     conferences: ['name', 'date', 'location'],
   })
-  const [searchQuery, setSearchQuery] = useState('');
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
-  const swapyRef = useRef<ReturnType<typeof createSwapy> | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [localSearchQuery, setLocalSearchQuery] = useState('');
 
-  // Table columns with visibility control
-  const attendeeColumns: ColumnDef<Attendee>[] = [
+  // Memoize column definitions
+  const attendeeColumns = useMemo<ColumnDef<Attendee>[]>(() => [
     {
       id: 'name',
       header: 'Name',
@@ -102,15 +97,15 @@ export default function Home() {
     { id: 'phone', header: 'Phone', accessorKey: 'phone' },
     { id: 'title', header: 'Title', accessorKey: 'title' },
     { id: 'company', header: 'Company', accessorKey: 'company' },
-  ]
+  ], []);
 
-  const healthSystemColumns: ColumnDef<HealthSystem>[] = [
+  const healthSystemColumns = useMemo<ColumnDef<HealthSystem>[]>(() => [
     { id: 'name', header: 'Name', accessorKey: 'name' },
     { id: 'location', header: 'Location', accessorFn: (row) => `${row.city || ''}, ${row.state || ''}` },
     { id: 'website', header: 'Website', accessorKey: 'website' },
-  ]
+  ], []);
 
-  const conferenceColumns: ColumnDef<Conference>[] = [
+  const conferenceColumns = useMemo<ColumnDef<Conference>[]>(() => [
     { id: 'name', header: 'Name', accessorKey: 'name' },
     { 
       id: 'date',
@@ -123,52 +118,81 @@ export default function Home() {
       }
     },
     { id: 'location', header: 'Location', accessorKey: 'location' },
-  ]
+  ], []);
 
   // Get all available columns for current tab
   const getAllColumns = useMemo(() => {
     switch (activeTab) {
       case 'attendees':
-        return attendeeColumns
+        return attendeeColumns.map(col => ({
+          ...col,
+          accessorFn: (row: Attendee | HealthSystem | Conference) => {
+            if ('first_name' in row) {
+              const attendee = row as Attendee;
+              if (col.id === 'name') {
+                return `${attendee.first_name} ${attendee.last_name}`;
+              }
+              return attendee[col.id as keyof Attendee];
+            }
+            return undefined;
+          },
+          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
+            const row = info.row.original;
+            if ('first_name' in row) {
+              return typeof col.cell === 'function' ? col.cell(info as CellContext<Attendee, unknown>) : info.getValue();
+            }
+            return null;
+          }
+        })) as ColumnDef<Attendee | HealthSystem | Conference>[];
       case 'health-systems':
-        return healthSystemColumns
+        return healthSystemColumns.map(col => ({
+          ...col,
+          accessorFn: (row: Attendee | HealthSystem | Conference) => {
+            if ('name' in row && !('first_name' in row)) {
+              const healthSystem = row as HealthSystem;
+              if (col.id === 'location') {
+                return `${healthSystem.city || ''}, ${healthSystem.state || ''}`;
+              }
+              return healthSystem[col.id as keyof HealthSystem];
+            }
+            return undefined;
+          },
+          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
+            const row = info.row.original;
+            if ('name' in row && !('first_name' in row)) {
+              return typeof col.cell === 'function' ? col.cell(info as CellContext<HealthSystem, unknown>) : info.getValue();
+            }
+            return null;
+          }
+        })) as ColumnDef<Attendee | HealthSystem | Conference>[];
       case 'conferences':
-        return conferenceColumns
+        return conferenceColumns.map(col => ({
+          ...col,
+          accessorFn: (row: Attendee | HealthSystem | Conference) => {
+            if ('start_date' in row) {
+              const conference = row as Conference;
+              if (col.id === 'date') {
+                if (!conference.start_date) return '';
+                const start = new Date(conference.start_date).toLocaleDateString();
+                const end = conference.end_date ? new Date(conference.end_date).toLocaleDateString() : null;
+                return end ? `${start} - ${end}` : start;
+              }
+              return conference[col.id as keyof Conference];
+            }
+            return undefined;
+          },
+          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
+            const row = info.row.original;
+            if ('start_date' in row) {
+              return typeof col.cell === 'function' ? col.cell(info as CellContext<Conference, unknown>) : info.getValue();
+            }
+            return null;
+          }
+        })) as ColumnDef<Attendee | HealthSystem | Conference>[];
       default:
-        return []
+        return [];
     }
-  }, [activeTab]);
-
-  // Memoize the debounced search function
-  const debouncedSetSearch = useMemo(
-    () => debounce((value: string) => {
-      setSearchQuery(value);
-    }, 300),
-    []
-  );
-
-  // Memoize the base columns
-  const baseColumns = useMemo(() => getAllColumns, [getAllColumns]);
-
-  // Memoize ordered columns before filtering
-  const orderedColumns = useMemo(() => {
-    if (columnOrder.length === 0) return baseColumns;
-    return columnOrder
-      .map(id => baseColumns.find(col => col.id === id))
-      .filter((col): col is ColumnType => Boolean(col));
-  }, [baseColumns, columnOrder]);
-
-  // Memoize filtered columns
-  const filteredColumns = useMemo(() => {
-    if (!searchQuery) return orderedColumns;
-    
-    const lowerQuery = searchQuery.toLowerCase();
-    return orderedColumns.filter((column): column is ColumnType => {
-      if (!column || !column.header) return false;
-      const headerStr = String(column.header).toLowerCase();
-      return headerStr.includes(lowerQuery) && column.id !== 'name';
-    });
-  }, [orderedColumns, searchQuery]);
+  }, [activeTab, attendeeColumns, healthSystemColumns, conferenceColumns]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -203,12 +227,6 @@ export default function Home() {
     }
   }
 
-  // Filter options
-  const titleOptions = useMemo(() => {
-    const titles = Array.from(new Set(attendees.map(a => a.title).filter(Boolean)))
-    return titles.map(title => ({ id: title as string, name: title as string }))
-  }, [attendees])
-
   // Filtered data
   const filteredAttendees = useMemo(() => {
     return attendees.filter(attendee => {
@@ -217,14 +235,38 @@ export default function Home() {
         (attendee.email && attendee.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (attendee.company && attendee.company.toLowerCase().includes(searchTerm.toLowerCase()))
       
-      const titleMatch = selectedFilters.titles.length === 0 || 
-        (attendee.title && selectedFilters.titles.includes(attendee.title))
+      const filterMatch = activeFilters.every(filter => {
+        const value = filter.property === 'name' 
+          ? `${attendee.first_name} ${attendee.last_name}`
+          : attendee[filter.property as keyof Attendee]
+
+        if (typeof value === 'undefined') return true
+
+        switch (filter.operator) {
+          case 'equals':
+            return String(value).toLowerCase() === filter.value.toLowerCase()
+          case 'contains':
+            return String(value).toLowerCase().includes(filter.value.toLowerCase())
+          case 'starts_with':
+            return String(value).toLowerCase().startsWith(filter.value.toLowerCase())
+          case 'ends_with':
+            return String(value).toLowerCase().endsWith(filter.value.toLowerCase())
+          case 'is_empty':
+            return !value || String(value).trim() === ''
+          case 'is_not_empty':
+            return value && String(value).trim() !== ''
+          case 'greater_than':
+            return new Date(String(value)) > new Date(filter.value)
+          case 'less_than':
+            return new Date(String(value)) < new Date(filter.value)
+          default:
+            return true
+        }
+      })
       
-      // Add more filters as needed
-      
-      return searchMatch && titleMatch
+      return searchMatch && filterMatch
     })
-  }, [attendees, searchTerm, selectedFilters])
+  }, [attendees, searchTerm, activeFilters])
 
   const filteredHealthSystems = useMemo(() => {
     return healthSystems.filter(hs => {
@@ -232,12 +274,36 @@ export default function Home() {
         hs.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (hs.city && hs.city.toLowerCase().includes(searchTerm.toLowerCase()))
       
-      const stateMatch = selectedFilters.states.length === 0 || 
-        (hs.state && selectedFilters.states.includes(hs.state))
+      const filterMatch = activeFilters.every(filter => {
+        const value = hs[filter.property as keyof HealthSystem]
+
+        if (typeof value === 'undefined') return true
+
+        switch (filter.operator) {
+          case 'equals':
+            return String(value).toLowerCase() === filter.value.toLowerCase()
+          case 'contains':
+            return String(value).toLowerCase().includes(filter.value.toLowerCase())
+          case 'starts_with':
+            return String(value).toLowerCase().startsWith(filter.value.toLowerCase())
+          case 'ends_with':
+            return String(value).toLowerCase().endsWith(filter.value.toLowerCase())
+          case 'is_empty':
+            return !value || String(value).trim() === ''
+          case 'is_not_empty':
+            return value && String(value).trim() !== ''
+          case 'greater_than':
+            return new Date(String(value)) > new Date(filter.value)
+          case 'less_than':
+            return new Date(String(value)) < new Date(filter.value)
+          default:
+            return true
+        }
+      })
       
-      return searchMatch && stateMatch
+      return searchMatch && filterMatch
     })
-  }, [healthSystems, searchTerm, selectedFilters])
+  }, [healthSystems, searchTerm, activeFilters])
 
   const filteredConferences = useMemo(() => {
     return conferences.filter(conference => {
@@ -245,53 +311,86 @@ export default function Home() {
         conference.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (conference.location && conference.location.toLowerCase().includes(searchTerm.toLowerCase()))
       
-      return searchMatch
+      const filterMatch = activeFilters.every(filter => {
+        const value = conference[filter.property as keyof Conference]
+
+        if (typeof value === 'undefined') return true
+
+        switch (filter.operator) {
+          case 'equals':
+            return String(value).toLowerCase() === filter.value.toLowerCase()
+          case 'contains':
+            return String(value).toLowerCase().includes(filter.value.toLowerCase())
+          case 'starts_with':
+            return String(value).toLowerCase().startsWith(filter.value.toLowerCase())
+          case 'ends_with':
+            return String(value).toLowerCase().endsWith(filter.value.toLowerCase())
+          case 'is_empty':
+            return !value || String(value).trim() === ''
+          case 'is_not_empty':
+            return value && String(value).trim() !== ''
+          case 'greater_than':
+            return new Date(String(value)) > new Date(filter.value)
+          case 'less_than':
+            return new Date(String(value)) < new Date(filter.value)
+          default:
+            return true
+        }
+      })
+      
+      return searchMatch && filterMatch
     })
-  }, [conferences, searchTerm])
+  }, [conferences, searchTerm, activeFilters])
 
   // Get visible columns for current tab
   const getVisibleColumns = () => {
     const currentVisibleColumns = visibleColumns[activeTab];
     // Always include the name column if it exists
-    const nameColumn = getAllColumns.find((col: ColumnType) => col.id === 'name');
-    const visibleColumnsWithName = nameColumn 
-      ? [nameColumn, ...getAllColumns.filter((col: ColumnType) => col.id !== 'name' && currentVisibleColumns.includes(col.id as string))]
-      : getAllColumns.filter((col: ColumnType) => currentVisibleColumns.includes(col.id as string));
-
-    switch (activeTab) {
-      case 'attendees':
-        return visibleColumnsWithName as ColumnDef<Attendee>[];
-      case 'health-systems':
-        return visibleColumnsWithName as ColumnDef<HealthSystem>[];
-      case 'conferences':
-        return visibleColumnsWithName as ColumnDef<Conference>[];
-      default:
-        return [];
-    }
+    const nameColumn = getAllColumns.find((col) => col.id === 'name');
+    return nameColumn 
+      ? [nameColumn, ...getAllColumns.filter((col) => col.id !== 'name' && currentVisibleColumns.includes(col.id as string))]
+      : getAllColumns.filter((col) => currentVisibleColumns.includes(col.id as string));
   }
 
   // Handle column visibility toggle
   const handleColumnToggle = (columnId: string) => {
     if (columnId === 'name') return; // Prevent toggling the name column
     
-    setVisibleColumns(prev => ({
-      ...prev,
-      [activeTab]: prev[activeTab].includes(columnId)
+    setVisibleColumns(prev => {
+      const newVisibleColumns = prev[activeTab].includes(columnId)
         ? prev[activeTab].filter(id => id !== columnId)
-        : [...prev[activeTab], columnId]
-    }))
+        : [...prev[activeTab], columnId];
+      
+      // Update columnOrder to match the new visible columns
+      setColumnOrder(prevOrder => {
+        if (prev[activeTab].includes(columnId)) {
+          // If hiding a column, remove it from the order
+          return prevOrder.filter(id => id !== columnId);
+        } else {
+          // If showing a column, add it to the end of the order
+          return [...prevOrder, columnId];
+        }
+      });
+      
+      return {
+        ...prev,
+        [activeTab]: newVisibleColumns
+      };
+    });
   }
 
   const handleSearch = (term: string) => {
     setSearchTerm(term)
   }
 
-  const handleFilterChange = (filterType: keyof typeof selectedFilters, values: string[]) => {
-    setSelectedFilters(prev => ({
-      ...prev,
-      [filterType]: values
-    }))
-  }
+  const handleFilterChange = (filters: Array<{
+    id: string
+    property: string
+    operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
+    value: string
+  }>) => {
+    setActiveFilters(filters);
+  };
 
   // Handle update from detail components
   const handleAttendeeUpdate = (updatedAttendee: Attendee) => {
@@ -331,6 +430,29 @@ export default function Home() {
   }
 
   const renderCardView = () => {
+    const getColumnIcon = (columnId: string) => {
+      switch (columnId) {
+        case 'name':
+          return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
+        case 'email':
+          return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
+        case 'phone':
+          return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />
+        case 'title':
+          return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />
+        case 'company':
+          return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
+        case 'location':
+          return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
+        case 'website':
+          return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
+        case 'date':
+          return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+        default:
+          return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />
+      }
+    };
+
     const getVisibleFields = (item: Attendee | HealthSystem | Conference) => {
       const fields: { label: string; value: string; icon: React.ReactNode }[] = [];
       const visibleColumnIds = visibleColumns[activeTab];
@@ -339,22 +461,15 @@ export default function Home() {
         if (id === 'name') return; // Skip name field
         if (!visibleColumnIds.includes(id)) return;
 
-        const column = getAllColumns.find((col: ColumnType) => col.id === id);
+        const column = getAllColumns.find((col) => col.id === id);
         if (!column) return;
 
         let value = '';
         if ('accessorKey' in column && column.accessorKey) {
           const key = column.accessorKey as keyof (Attendee | HealthSystem | Conference);
           value = String(item[key] || '');
-        } else if ('accessorFn' in column) {
-          // Type guard for different item types
-          if ('first_name' in item) {
-            value = String((column as any).accessorFn(item as Attendee) || '');
-          } else if ('start_date' in item) {
-            value = String((column as any).accessorFn(item as Conference) || '');
-          } else {
-            value = String((column as any).accessorFn(item as HealthSystem) || '');
-          }
+        } else if ('accessorFn' in column && typeof column.accessorFn === 'function') {
+          value = String(column.accessorFn(item, 0) || '');
         }
 
         fields.push({
@@ -491,42 +606,24 @@ export default function Home() {
           
           <div className="flex items-center gap-4 relative z-40">
             <FilterMenu
-              title="Title"
-              options={titleOptions}
-              selectedValues={selectedFilters.titles}
-              onChange={(values) => handleFilterChange('titles', values)}
+              columns={getAllColumns.map(col => ({
+                id: String(col.id),
+                header: String(col.header)
+              }))}
+              onFilterChange={handleFilterChange}
+              isOpen={activeMenu === 'filter'}
+              onToggle={() => handleMenuToggle('filter')}
             />
             
-            <div className="relative">
-              <button
-                onClick={() => document.getElementById('column-menu')?.classList.toggle('hidden')}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
-              >
-                <Icon icon={AdjustmentsHorizontalIcon} size="xs" className="mr-2" />
-                Properties
-              </button>
-              <div
-                id="column-menu"
-                className="hidden absolute right-0 mt-2 w-72 rounded-md bg-white border border-gray-200 shadow-lg z-50"
-              >
-                <div className="p-4">
-                  <div className="relative mb-4">
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      placeholder="Search for a property..."
-                      value={localSearchQuery}
-                      onChange={handleSearchChange}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1">
-                    {renderPropertiesList()}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <PropertiesMenu
+              columns={getAllColumns}
+              visibleColumns={visibleColumns[activeTab]}
+              onColumnToggle={handleColumnToggle}
+              onColumnOrderChange={setColumnOrder}
+              view={view}
+              isOpen={activeMenu === 'properties'}
+              onToggle={() => handleMenuToggle('properties')}
+            />
             
             <div className="flex items-center space-x-2 relative z-40">
               <button
@@ -556,6 +653,57 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                 </svg>
               </button>
+
+              {view === 'cards' && (
+                <div className="relative">
+                  <button
+                    onClick={() => handleMenuToggle('view-settings')}
+                    className="p-2 rounded-md bg-white text-gray-500 hover:bg-gray-50 border border-gray-300 transition-colors flex items-center justify-center menu-button"
+                    aria-label="View settings"
+                  >
+                    <Icon icon={Cog6ToothIcon} size="sm" />
+                  </button>
+                  {activeMenu === 'view-settings' && (
+                    <div className="absolute right-0 mt-2 w-48 rounded-md bg-white border border-gray-200 shadow-lg z-50 menu-content">
+                      <div className="p-4">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                              <Icon icon={ViewColumnsIcon} size="sm" className="mr-2 text-gray-400" />
+                              Columns per row
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => setColumnsPerRow(Math.max(1, columnsPerRow - 1))}
+                                disabled={columnsPerRow <= 1}
+                                className={`p-1 rounded-md ${
+                                  columnsPerRow <= 1
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                              >
+                                -
+                              </button>
+                              <span className="text-sm text-gray-900">{columnsPerRow}</span>
+                              <button
+                                onClick={() => setColumnsPerRow(Math.min(4, columnsPerRow + 1))}
+                                disabled={columnsPerRow >= 4}
+                                className={`p-1 rounded-md ${
+                                  columnsPerRow >= 4
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -621,7 +769,12 @@ export default function Home() {
             )}
           </div>
         ) : (
-          <div className="space-y-4 relative z-0">
+          <div className={`grid gap-4 relative z-0 ${
+            columnsPerRow === 1 ? 'grid-cols-1' :
+            columnsPerRow === 2 ? 'grid-cols-1 sm:grid-cols-2' :
+            columnsPerRow === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' :
+            'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+          }`}>
             {renderCardView()}
           </div>
         )}
@@ -629,170 +782,36 @@ export default function Home() {
     )
   }
 
-  const getColumnIcon = (columnId: string) => {
-    switch (columnId) {
-      case 'name':
-        return <Icon icon={UserIcon} size="sm" className="text-gray-400" />;
-      case 'email':
-        return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />;
-      case 'phone':
-        return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />;
-      case 'title':
-        return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />;
-      case 'company':
-        return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />;
-      case 'location':
-        return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />;
-      case 'website':
-        return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />;
-      case 'date':
-        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />;
-      default:
-        return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />;
+  // Initialize columnOrder when view changes
+  useEffect(() => {
+    if (view === 'cards') {
+      setColumnOrder(visibleColumns[activeTab]);
     }
-  };
+  }, [view, activeTab, visibleColumns]);
 
-  // Initialize column order
+  const handleMenuToggle = (menu: 'filter' | 'properties' | 'view-settings') => {
+    // If clicking the same menu that's open, close it
+    if (activeMenu === menu) {
+      setActiveMenu(null)
+    } else {
+      // Otherwise, open the clicked menu and close any others
+      setActiveMenu(menu)
+    }
+  }
+
+  // Add a click outside handler to close all menus
   useEffect(() => {
-    const initialOrder = getAllColumns.map((col: ColumnType) => col.id as string);
-    setColumnOrder(initialOrder);
-  }, [activeTab, getAllColumns]);
-
-  // Update the properties list rendering with drag handle and sections
-  const renderPropertiesList = () => {
-    const shownColumns = filteredColumns.filter(column => 
-      column.id === 'name' || visibleColumns[activeTab].includes(String(column.id))
-    );
-    const hiddenColumns = filteredColumns.filter(column => 
-      column.id !== 'name' && !visibleColumns[activeTab].includes(String(column.id))
-    );
-
-    const viewText = view === 'cards' ? 'Card' : 'Table';
-
-    return (
-      <div className="space-y-4">
-        <div>
-          <div className="text-sm font-medium text-gray-700 mb-2">
-            Shown in {viewText}
-          </div>
-          <div id="shown-properties-list" className="space-y-1">
-            {shownColumns.map((column) => {
-              const isNameColumn = column.id === 'name';
-              const icon = getColumnIcon(String(column.id));
-              return (
-                <div
-                  key={String(column.id)}
-                  data-swapy-slot={String(column.id)}
-                  className="mb-1"
-                >
-                  <div
-                    data-swapy-item={String(column.id)}
-                    className={`flex items-center px-3 py-2 rounded-lg hover:bg-gray-50 ${isNameColumn ? 'opacity-50' : ''}`}
-                  >
-                    <div className="flex items-center flex-1 min-w-0">
-                      <div 
-                        className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400 cursor-grab"
-                      >
-                        <Icon icon={Bars3Icon} size="sm" />
-                      </div>
-                      <div className="flex items-center justify-center w-6 h-6 mr-3">
-                        {icon}
-                      </div>
-                      <span className="text-sm text-gray-900 truncate">
-                        {String(column.header)}
-                      </span>
-                    </div>
-                    <div className="ml-3 flex items-center h-5">
-                      <input
-                        type="checkbox"
-                        checked={true}
-                        onChange={() => !isNameColumn && handleColumnToggle(String(column.id))}
-                        disabled={isNameColumn}
-                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {hiddenColumns.length > 0 && (
-          <div>
-            <div className="text-sm font-medium text-gray-700 mb-2">
-              Not Shown in {viewText}
-            </div>
-            <div id="hidden-properties-list" className="space-y-1">
-              {hiddenColumns.map((column) => {
-                const icon = getColumnIcon(String(column.id));
-                return (
-                  <div
-                    key={String(column.id)}
-                    className="mb-1"
-                  >
-                    <div
-                      className="flex items-center px-3 py-2 rounded-lg hover:bg-gray-50"
-                    >
-                      <div className="flex items-center flex-1 min-w-0">
-                        <div 
-                          className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400"
-                        >
-                          <Icon icon={Bars3Icon} size="sm" />
-                        </div>
-                        <div className="flex items-center justify-center w-6 h-6 mr-3">
-                          {icon}
-                        </div>
-                        <span className="text-sm text-gray-900 truncate">
-                          {String(column.header)}
-                        </span>
-                      </div>
-                      <div className="ml-3 flex items-center h-5">
-                        <input
-                          type="checkbox"
-                          checked={false}
-                          onChange={() => handleColumnToggle(String(column.id))}
-                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Update Swapy initialization to use basic setup
-  useEffect(() => {
-    const container = document.querySelector('#shown-properties-list') as HTMLElement;
-    if (!container) return;
-
-    swapyRef.current = createSwapy(container);
-
-    swapyRef.current.onSwap(() => {
-      const newOrder = Array.from(container.querySelectorAll('[data-swapy-item]'))
-        .map(item => item.getAttribute('data-swapy-item'))
-        .filter((id): id is string => id !== null);
-      setColumnOrder(newOrder);
-    });
-
-    return () => {
-      if (swapyRef.current) {
-        swapyRef.current.destroy();
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as HTMLElement
+      // Check if click is outside of any menu button or menu content
+      if (!target.closest('.menu-button') && !target.closest('.menu-content')) {
+        setActiveMenu(null)
       }
-    };
-  }, [activeTab, view]);
+    }
 
-  // Handle search input change with local state
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setLocalSearchQuery(value);
-    debouncedSetSearch(value);
-  };
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   return (
     <main className="min-h-screen bg-gray-50">
