@@ -1,0 +1,58 @@
+import { ReactNode } from 'react'
+
+interface ItemCardProps {
+  title: string
+  subtitle?: string
+  tags?: { text: string; color: 'primary' | 'secondary' | 'accent' | 'gray' }[]
+  children?: ReactNode
+  onClick?: () => void
+  icon?: ReactNode
+}
+
+export function ItemCard({ title, subtitle, tags, children, onClick, icon }: ItemCardProps) {
+  return (
+    <div 
+      className="bg-white rounded-xl border border-gray-100 shadow-card hover:shadow-card-hover p-5 
+                transition-all duration-200 ease-in-out transform hover:-translate-y-1 cursor-pointer"
+      onClick={onClick}
+    >
+      <div className="flex items-start space-x-4">
+        {icon && (
+          <div className="flex-shrink-0 icon-container bg-gray-50 p-2 rounded-lg w-10 h-10">
+            {icon}
+          </div>
+        )}
+        <div className="flex-grow min-w-0">
+          <div className="flex items-center space-x-2">
+            <h3 className="text-lg font-medium text-gray-900 truncate group-hover:text-primary-600 transition-colors duration-200">
+              {title}
+            </h3>
+          </div>
+          {subtitle && (
+            <p className="text-sm text-gray-500 mt-1 truncate">
+              {subtitle}
+            </p>
+          )}
+          {tags && tags.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {tags.map((tag, index) => (
+                <span key={index} className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                  ${tag.color === 'primary' ? 'bg-primary-100 text-primary-800' : 
+                    tag.color === 'secondary' ? 'bg-secondary-100 text-secondary-800' : 
+                    tag.color === 'accent' ? 'bg-accent-100 text-accent-800' : 
+                    'bg-gray-100 text-gray-800'}`}>
+                  {tag.text}
+                </span>
+              ))}
+            </div>
+          )}
+          {children && (
+            <div className="mt-3 text-sm text-gray-600">
+              {children}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+} 

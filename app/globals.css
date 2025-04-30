@@ -1,0 +1,258 @@
+@import "tailwindcss";
+
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --secondary: #10b981;
+  --secondary-light: #34d399;
+  --secondary-dark: #059669;
+  --accent: #f43f5e;
+  --accent-light: #fb7185;
+  --accent-dark: #e11d48;
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --radius: 0.5rem;
+}
+
+body {
+  background-color: #f8fafc;
+  color: var(--foreground);
+}
+
+/* Icon specific styles */
+svg {
+  display: block;
+}
+
+.icon-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Glassmorphism for cards */
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.glass-card:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+/* Custom animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Modern card styles */
+.modern-card {
+  border-radius: 0.75rem;
+  background-color: white;
+  padding: 1.25rem;
+  border: 1px solid #f3f4f6;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  transition: all 200ms;
+}
+
+.modern-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-color: #e5e7eb;
+  transform: translateY(-2px);
+}
+
+/* Notion-like text styling */
+.notion-h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: -0.025em;
+}
+
+.notion-h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1f2937;
+  letter-spacing: -0.025em;
+}
+
+.notion-h3 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.notion-p {
+  color: #4b5563;
+  line-height: 1.625;
+}
+
+/* Modern button styles */
+.btn-primary {
+  background-color: #4f46e5;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: background-color 200ms;
+}
+
+.btn-primary:hover {
+  background-color: #4338ca;
+}
+
+.btn-secondary {
+  background-color: white;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: background-color 200ms;
+}
+
+.btn-secondary:hover {
+  background-color: #f9fafb;
+}
+
+.btn-accent {
+  background-color: #f43f5e;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: background-color 200ms;
+}
+
+.btn-accent:hover {
+  background-color: #e11d48;
+}
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-primary {
+  background-color: #e0e7ff;
+  color: #4338ca;
+}
+
+.badge-secondary {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badge-accent {
+  background-color: #ffe4e6;
+  color: #be123c;
+}
+
+.badge-gray {
+  background-color: #f3f4f6;
+  color: #1f2937;
+}
+
+/* Table styles */
+.modern-table {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.modern-table thead {
+  background-color: #f9fafb;
+}
+
+.modern-table th {
+  padding: 0.75rem 1.5rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.modern-table tbody {
+  background-color: white;
+}
+
+.modern-table td {
+  padding: 1rem 1.5rem;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  color: #111827;
+  border-top: 1px solid #f3f4f6;
+}
+
+/* Search bar */
+.search-bar {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
+  outline: none;
+  transition: all 200ms;
+}
+
+.search-bar:focus {
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+  border-color: #6366f1;
+}
+
+/* Gradient backgrounds */
+.bg-gradient-primary {
+  background-image: linear-gradient(to right, #6366f1, #8b5cf6);
+}
+
+.bg-gradient-secondary {
+  background-image: linear-gradient(to right, #10b981, #14b8a6);
+}
+
+.bg-gradient-accent {
+  background-image: linear-gradient(to right, #f43f5e, #ec4899);
+} 
