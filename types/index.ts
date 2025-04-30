@@ -39,6 +39,7 @@ export interface Attendee {
   title?: string
   company?: string
   health_system_id?: string
+  health_systems?: HealthSystem
   email?: string
   phone?: string
   linkedin_url?: string

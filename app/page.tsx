@@ -6,22 +6,55 @@ import { CardView } from '@/components/CardView'
 import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
 import { ItemCard } from '@/components/ItemCard'
+import { AttendeeDetail } from '@/components/AttendeeDetail'
+import { ConferenceDetail } from '@/components/ConferenceDetail'
+import { HealthSystemDetail } from '@/components/HealthSystemDetail'
 import { supabase } from '@/lib/supabase'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 import { ColumnDef } from '@tanstack/react-table'
+import Image from 'next/image'
 import { 
   UserIcon, 
   BuildingOfficeIcon, 
   CalendarIcon, 
-  PresentationChartBarIcon,
   MapPinIcon,
   EnvelopeIcon,
-  PhoneIcon,
-  LinkIcon,
   ArrowLeftIcon,
-  UserCircleIcon,
 } from '@heroicons/react/24/outline'
 import { Icon } from '@/components/Icon'
+
+// Helper function to fetch all records using pagination
+async function fetchAllRecords<T>(
+  table: string, 
+  query: string, 
+  pageSize = 1000
+): Promise<T[]> {
+  let allData: T[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    
+    const { data, error } = await supabase
+      .from(table)
+      .select(query, { count: 'exact' })
+      .range(from, to);
+
+    if (error) throw error;
+    
+    if (data && data.length > 0) {
+      allData = [...allData, ...data as T[]];
+      page++;
+    }
+    
+    // If we got fewer records than requested, we've reached the end
+    hasMore = data && data.length === pageSize;
+  }
+
+  return allData;
+}
 
 export default function Home() {
   const [view, setView] = useState<'table' | 'cards'>('cards')
@@ -49,40 +82,21 @@ export default function Home() {
       setIsLoading(true)
       setError(null)
 
-      // Fetch attendees with their health system information
-      const { data: attendeesData, error: attendeesError } = await supabase
-        .from('attendees')
-        .select(`
-          *,
-          health_systems (
-            id,
-            name,
-            definitive_id,
-            website,
-            address,
-            city,
-            state,
-            zip
-          )
-        `)
+      // Fetch all attendees with health system info
+      const attendeesQuery = `*, health_systems (id, name, definitive_id, website, address, city, state, zip)`;
+      const attendeesData = await fetchAllRecords<Attendee>('attendees', attendeesQuery);
+      
+      // Fetch all conferences
+      const conferencesData = await fetchAllRecords<Conference>('conferences', '*');
+      
+      // Fetch all health systems
+      const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', '*');
 
-      // Fetch conferences
-      const { data: conferencesData, error: conferencesError } = await supabase
-        .from('conferences')
-        .select('*')
-
-      // Fetch health systems
-      const { data: healthSystemsData, error: healthSystemsError } = await supabase
-        .from('health_systems')
-        .select('*')
-
-      if (attendeesError) throw attendeesError
-      if (conferencesError) throw conferencesError
-      if (healthSystemsError) throw healthSystemsError
-
-      if (attendeesData) setAttendees(attendeesData)
-      if (conferencesData) setConferences(conferencesData)
-      if (healthSystemsData) setHealthSystems(healthSystemsData)
+      // Update state with fetched data
+      setAttendees(attendeesData);
+      setConferences(conferencesData);
+      setHealthSystems(healthSystemsData);
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while fetching data')
       console.error('Error fetching data:', err)
@@ -101,10 +115,6 @@ export default function Home() {
     const states = Array.from(new Set(healthSystems.map(hs => hs.state).filter(Boolean)))
     return states.map(state => ({ id: state as string, name: state as string }))
   }, [healthSystems])
-
-  const conferenceOptions = useMemo(() => {
-    return conferences.map(conf => ({ id: conf.id, name: conf.name }))
-  }, [conferences])
 
   // Filtered data
   const filteredAttendees = useMemo(() => {
@@ -189,187 +199,40 @@ export default function Home() {
     }))
   }
 
+  // Handle update from detail components
+  const handleAttendeeUpdate = (updatedAttendee: Attendee) => {
+    setAttendees(prev => 
+      prev.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
+    );
+    setSelectedItem(updatedAttendee);
+  };
+
+  const handleConferenceUpdate = (updatedConference: Conference) => {
+    setConferences(prev => 
+      prev.map(c => c.id === updatedConference.id ? updatedConference : c)
+    );
+    setSelectedItem(updatedConference);
+  };
+
+  const handleHealthSystemUpdate = (updatedHealthSystem: HealthSystem) => {
+    setHealthSystems(prev => 
+      prev.map(hs => hs.id === updatedHealthSystem.id ? updatedHealthSystem : hs)
+    );
+    setSelectedItem(updatedHealthSystem);
+  };
+
   const renderSelectedItemDetail = () => {
     if (!selectedItem) return null
 
     if ('first_name' in selectedItem) {
       // Attendee detail view
-      const attendee = selectedItem as Attendee;
-      return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 animate-fade-in">
-          <div className="flex items-start">
-            <div className="flex-shrink-0 mr-4">
-              <div className="bg-primary-100 p-3 rounded-full icon-container w-12 h-12">
-                <Icon icon={UserIcon} size="md" className="text-primary-600" />
-              </div>
-            </div>
-            <div className="flex-grow">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                {attendee.first_name} {attendee.last_name}
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                {attendee.title && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={UserCircleIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">{attendee.title}</span>
-                  </div>
-                )}
-                
-                {attendee.company && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={BuildingOfficeIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">{attendee.company}</span>
-                  </div>
-                )}
-                
-                {attendee.email && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={EnvelopeIcon} size="xs" className="text-gray-400" />
-                    <a href={`mailto:${attendee.email}`} className="text-primary-600 hover:text-primary-800">
-                      {attendee.email}
-                    </a>
-                  </div>
-                )}
-                
-                {attendee.phone && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={PhoneIcon} size="xs" className="text-gray-400" />
-                    <a href={`tel:${attendee.phone}`} className="text-primary-600 hover:text-primary-800">
-                      {attendee.phone}
-                    </a>
-                  </div>
-                )}
-                
-                {attendee.linkedin_url && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={LinkIcon} size="xs" className="text-gray-400" />
-                    <a 
-                      href={attendee.linkedin_url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-primary-600 hover:text-primary-800"
-                    >
-                      LinkedIn Profile
-                    </a>
-                  </div>
-                )}
-              </div>
-              
-              {attendee.notes && (
-                <div className="mt-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Notes</h3>
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-gray-600 whitespace-pre-line text-sm">{attendee.notes}</p>
-                  </div>
-                </div>
-              )}
-              
-              {attendee.certifications && attendee.certifications.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Certifications</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {attendee.certifications.map((cert, idx) => (
-                      <span key={idx} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary-100 text-secondary-800">
-                        {cert}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )
+      return <AttendeeDetail attendee={selectedItem} onUpdate={handleAttendeeUpdate} />
     } else if ('start_date' in selectedItem) {
       // Conference detail view
-      const conference = selectedItem as Conference;
-      return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 animate-fade-in">
-          <div className="flex items-start">
-            <div className="flex-shrink-0 mr-4">
-              <div className="bg-secondary-100 p-3 rounded-full icon-container w-12 h-12">
-                <Icon icon={CalendarIcon} size="md" className="text-secondary-600" />
-              </div>
-            </div>
-            <div className="flex-grow">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                {conference.name}
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                {conference.start_date && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={CalendarIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">
-                      {new Date(conference.start_date).toLocaleDateString()}
-                      {conference.end_date && ` - ${new Date(conference.end_date).toLocaleDateString()}`}
-                    </span>
-                  </div>
-                )}
-                
-                {conference.location && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={MapPinIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">{conference.location}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
+      return <ConferenceDetail conference={selectedItem} onUpdate={handleConferenceUpdate} />
     } else {
       // Health System detail view
-      const healthSystem = selectedItem as HealthSystem;
-      return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 animate-fade-in">
-          <div className="flex items-start">
-            <div className="flex-shrink-0 mr-4">
-              <div className="bg-accent-100 p-3 rounded-full icon-container w-12 h-12">
-                <Icon icon={BuildingOfficeIcon} size="md" className="text-accent-600" />
-              </div>
-            </div>
-            <div className="flex-grow">
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                {healthSystem.name}
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                {(healthSystem.city || healthSystem.state) && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={MapPinIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">
-                      {[healthSystem.city, healthSystem.state].filter(Boolean).join(', ')}
-                    </span>
-                  </div>
-                )}
-                
-                {healthSystem.address && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={BuildingOfficeIcon} size="xs" className="text-gray-400" />
-                    <span className="text-gray-700">{healthSystem.address}</span>
-                  </div>
-                )}
-                
-                {healthSystem.website && (
-                  <div className="flex items-center space-x-2">
-                    <Icon icon={LinkIcon} size="xs" className="text-gray-400" />
-                    <a 
-                      href={healthSystem.website} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-primary-600 hover:text-primary-800"
-                    >
-                      Visit Website
-                    </a>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
+      return <HealthSystemDetail healthSystem={selectedItem} onUpdate={handleHealthSystemUpdate} />
     }
   }
 
@@ -612,10 +475,15 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-3">
-              <div className="bg-gradient-to-r from-primary-500 to-primary-600 p-2 rounded-lg shadow-sm flex items-center justify-center w-8 h-8">
-                <Icon icon={PresentationChartBarIcon} size="sm" className="text-white" />
-              </div>
-              <h1 className="text-xl font-bold text-gray-900">OnCare CRM</h1>
+              <Image 
+                src="/oncare_logo.svg" 
+                alt="OnCare Logo" 
+                width={32}
+                height={32}
+                className="h-8 w-auto"
+                priority
+              />
+              <h1 className="text-xl font-bold text-gray-900">Oncare CRM</h1>
             </div>
           </div>
         </div>
