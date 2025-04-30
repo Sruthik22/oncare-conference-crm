@@ -18,6 +18,8 @@ import debounce from 'lodash/debounce'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 
+// TODO: drag and drop doesn't work on the columns
+
 type ColumnType = ColumnDef<Attendee | HealthSystem | Conference>
 
 interface PropertiesMenuProps {
@@ -91,8 +93,15 @@ export function PropertiesMenu({
     const container = document.querySelector('#shown-properties-list') as HTMLElement
     if (!container) return
 
+    // Clean up any existing Swapy instance
+    if (swapyRef.current) {
+      swapyRef.current.destroy()
+    }
+
+    // Create new Swapy instance with basic configuration
     swapyRef.current = createSwapy(container)
 
+    // Set up the swap event handler
     swapyRef.current.onSwap(() => {
       const newOrder = Array.from(container.querySelectorAll('[data-swapy-item]'))
         .map(item => item.getAttribute('data-swapy-item'))
@@ -137,19 +146,25 @@ export function PropertiesMenu({
                     data-swapy-item={String(column.id)}
                     className={`flex items-center px-3 py-2 rounded-lg hover:bg-gray-50 ${isNameColumn ? 'opacity-50' : 'cursor-pointer'}`}
                     onClick={(e) => {
-                      // Don't toggle if clicking the drag handle
-                      if ((e.target as HTMLElement).closest('.drag-handle')) return;
+                      // Don't toggle if clicking the drag handle or checkbox
+                      if ((e.target as HTMLElement).closest('.drag-handle') || 
+                          (e.target as HTMLElement).closest('input[type="checkbox"]')) {
+                        return;
+                      }
                       if (!isNameColumn) {
                         onColumnToggle(String(column.id));
                       }
                     }}
                   >
                     <div className="flex items-center flex-1 min-w-0">
-                      <div 
-                        className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400 cursor-grab drag-handle"
-                      >
-                        <Icon icon={Bars3Icon} size="sm" />
-                      </div>
+                      {!isNameColumn && (
+                        <div 
+                          className="flex items-center justify-center w-6 h-6 mr-2 text-gray-400 cursor-grab hover:text-gray-600 hover:bg-gray-100 rounded drag-handle"
+                          data-swapy-handle
+                        >
+                          <Icon icon={Bars3Icon} size="sm" />
+                        </div>
+                      )}
                       <div className="flex items-center justify-center w-6 h-6 mr-3">
                         {icon}
                       </div>
@@ -188,7 +203,13 @@ export function PropertiesMenu({
                   >
                     <div
                       className="flex items-center px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer"
-                      onClick={() => onColumnToggle(String(column.id))}
+                      onClick={(e) => {
+                        // Don't toggle if clicking the checkbox
+                        if ((e.target as HTMLElement).closest('input[type="checkbox"]')) {
+                          return;
+                        }
+                        onColumnToggle(String(column.id));
+                      }}
                     >
                       <div className="flex items-center flex-1 min-w-0">
                         <div 
