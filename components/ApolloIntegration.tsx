@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, Fragment } from 'react';
 import Image from 'next/image';
 import { Attendee } from '@/types';
-import { apolloService, ApolloContact, ApolloEnrichmentResponse } from '@/lib/apollo';
-import { ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
+import { apolloService, ApolloContactCreate, ApolloEnrichmentResponse } from '@/lib/apollo';
+import { ArrowPathIcon, ArrowUpTrayIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
+import ApolloListModal from './ApolloListModal';
+import { Dialog, Transition } from '@headlessui/react';
 
 interface ApolloIntegrationProps {
   selectedAttendees: Attendee[];
@@ -18,6 +20,8 @@ export default function ApolloIntegration({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [enrichedData, setEnrichedData] = useState<ApolloEnrichmentResponse[]>([]);
+  const [isListModalOpen, setIsListModalOpen] = useState(false);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
   const handleEnrich = async () => {
     setIsLoading(true);
@@ -40,30 +44,35 @@ export default function ApolloIntegration({
     }
   };
 
-  const handlePushToApollo = async () => {
+  const handlePushToApollo = () => {
     if (!conferenceName) {
       setError('Conference name is required');
       return;
     }
+    setIsListModalOpen(true);
+  };
 
+  const handleListSelected = async (listName: string) => {
     setIsLoading(true);
     setError(null);
     try {
       // Convert attendees to Apollo contacts
-      const contacts: ApolloContact[] = selectedAttendees.map(attendee => ({
-        id: attendee.id.toString(),
+      const contacts: ApolloContactCreate[] = selectedAttendees.map(attendee => ({
         firstName: attendee.first_name,
         lastName: attendee.last_name,
         name: `${attendee.first_name} ${attendee.last_name}`,
-        email: '', // We don't have email
-        title: '', // We don't have title
+        email: attendee.email || '',
+        title: attendee.title || '',
         organization: attendee.health_systems?.name || attendee.company || '',
-        phone: '', // We don't have phone
-        linkedinUrl: '', // We don't have LinkedIn URL
+        phone: attendee.phone || '',
+        linkedinUrl: attendee.linkedin_url || '',
       }));
 
-      await apolloService.pushContactsToApollo(contacts, conferenceName);
+      // Push contacts to Apollo with the selected list name as the label
+      await apolloService.pushContactsToApollo(contacts, listName);
+      
       setError(null);
+      setIsSuccessModalOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to push contacts to Apollo');
     } finally {
@@ -141,6 +150,69 @@ export default function ApolloIntegration({
           </div>
         </div>
       )}
+
+      <ApolloListModal
+        isOpen={isListModalOpen}
+        onClose={() => setIsListModalOpen(false)}
+        onListSelected={handleListSelected}
+        defaultListName={conferenceName}
+      />
+
+      <Transition appear show={isSuccessModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setIsSuccessModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black bg-opacity-30" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-white p-6 text-left align-middle shadow-xl transition-all">
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-green-100">
+                      <CheckCircleIcon className="h-6 w-6 text-green-600" aria-hidden="true" />
+                    </div>
+                  </div>
+                  <Dialog.Title as="h3" className="text-lg font-medium leading-6 text-gray-900 text-center">
+                    Success!
+                  </Dialog.Title>
+                  <div className="mt-2">
+                    <p className="text-sm text-gray-500 text-center">
+                      Contacts have been successfully pushed to Apollo.
+                    </p>
+                  </div>
+
+                  <div className="mt-6 flex justify-center">
+                    <button
+                      type="button"
+                      className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                      onClick={() => setIsSuccessModalOpen(false)}
+                    >
+                      Got it, thanks!
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       {enrichedData.length > 0 && (
         <div className="mt-6">

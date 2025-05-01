@@ -1,5 +1,16 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 
+export interface ApolloContactCreate {
+  firstName: string;
+  lastName: string;
+  name: string;
+  email: string;
+  title: string;
+  organization: string;
+  phone: string;
+  linkedinUrl: string;
+}
+
 export interface ApolloContact {
   id: string;
   firstName: string;
@@ -23,6 +34,7 @@ export interface ApolloContact {
   subdepartments?: string[];
   functions?: string[];
   seniority?: string;
+  label_names?: string[];
   employment_history?: Array<{
     title: string;
     organization_name: string;
@@ -67,6 +79,23 @@ interface ApolloJob {
   start_date: string;
   end_date: string | null;
   current: boolean;
+}
+
+export interface ApolloList {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  count: number;
+}
+
+interface ApolloApiListResponse {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  cached_count: number;
+  modality: string;
 }
 
 export class ApolloService {
@@ -193,32 +222,144 @@ export class ApolloService {
     }
   }
 
-  async pushContactsToApollo(contacts: ApolloContact[], tag: string): Promise<void> {
+  async searchContacts(searchParams: ApolloSearchParams[]): Promise<ApolloContact[]> {
     try {
-      console.warn('Pushing contacts to Apollo:', { contacts, tag });
-      
-      // First, create the tag if it doesn't exist
-      await this.client.post('', {
-        endpoint: 'tags',
-        method: 'POST',
-        data: { name: tag }
-      });
+      // Since we're searching for a single contact, use the first set of params
+      const params = searchParams[0];
+      const keywords = [
+        params.firstName,
+        params.lastName,
+        params.organization
+      ].filter(Boolean).join('; ');
 
-      // Then, push contacts with the tag
       const response = await this.client.post('', {
-        endpoint: 'people/bulk_create',
+        endpoint: 'contacts/search',
         method: 'POST',
         data: {
-          people: contacts.map(contact => ({
-            ...contact,
-            tags: [tag],
-          })),
+          q_keywords: keywords
         }
       });
       
-      console.warn('Successfully pushed contacts to Apollo:', response.data);
+      return response.data.contacts || [];
+    } catch (error) {
+      console.error('Error searching Apollo contacts:', error);
+      throw error;
+    }
+  }
+
+  async createContact(contact: ApolloContactCreate, labelNames: string[]): Promise<ApolloContact> {
+    try {
+      const response = await this.client.post('', {
+        endpoint: 'contacts',
+        method: 'POST',
+        data: {
+          ...contact,
+          label_names: labelNames
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error creating Apollo contact:', error);
+      throw error;
+    }
+  }
+
+  async updateContact(contactId: string, labelNames: string[]): Promise<ApolloContact> {
+    try {
+      const response = await this.client.post('', {
+        endpoint: `contacts/${contactId}`,
+        method: 'PATCH',
+        data: {
+          label_names: labelNames
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error updating Apollo contact:', error);
+      throw error;
+    }
+  }
+
+  async pushContactsToApollo(contacts: ApolloContactCreate[], labelName: string): Promise<void> {
+    try {
+      console.warn('Pushing contacts to Apollo:', { contacts, labelName });
+      
+      for (const contact of contacts) {
+        // Search for existing contact
+        const existingContacts = await this.searchContacts([{
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          organization: contact.organization
+        }]);
+
+        if (existingContacts.length > 0) {
+          // Contact exists, update with new label while preserving existing labels
+          const existingContact = existingContacts[0];
+          const existingLabels = existingContact.label_names || [];
+          const updatedLabels = Array.from(new Set([...existingLabels, labelName])); // Remove duplicates
+          await this.updateContact(existingContact.id, updatedLabels);
+        } else {
+          // Contact doesn't exist, create new with label
+          await this.createContact(contact, [labelName]);
+        }
+      }
+      
+      console.warn('Successfully pushed contacts to Apollo');
     } catch (error) {
       console.error('Error pushing contacts to Apollo:', error);
+      throw error;
+    }
+  }
+
+  async getLists(): Promise<ApolloList[]> {
+    try {
+      const response = await this.client.post('', {
+        endpoint: 'labels',
+        method: 'GET'
+      });
+      
+      // Filter for contact lists only and map to our ApolloList interface
+      return (response.data || [])
+        .filter((list: ApolloApiListResponse) => list.modality === 'contacts')
+        .map((list: ApolloApiListResponse) => ({
+          id: list.id,
+          name: list.name,
+          created_at: list.created_at,
+          updated_at: list.updated_at,
+          count: list.cached_count || 0
+        }));
+    } catch (error) {
+      console.error('Error fetching Apollo lists:', error);
+      throw error;
+    }
+  }
+
+  async createList(name: string): Promise<ApolloList> {
+    try {
+      const response = await this.client.post('', {
+        endpoint: 'lists',
+        method: 'POST',
+        data: { name }
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error creating Apollo list:', error);
+      throw error;
+    }
+  }
+
+  async addContactsToList(listId: string, contactIds: string[]): Promise<void> {
+    try {
+      await this.client.post('', {
+        endpoint: `lists/${listId}/add_contacts`,
+        method: 'PATCH',
+        data: { contact_ids: contactIds }
+      });
+    } catch (error) {
+      console.error('Error adding contacts to Apollo list:', error);
       throw error;
     }
   }
