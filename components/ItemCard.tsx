@@ -1,4 +1,6 @@
 import { ReactNode } from 'react'
+import { useSelection } from '@/lib/context/SelectionContext'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface ItemCardProps {
   title: string
@@ -7,15 +9,42 @@ interface ItemCardProps {
   children?: ReactNode
   onClick?: () => void
   icon?: ReactNode
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  item?: any // The item being represented by this card
 }
 
-export function ItemCard({ title, subtitle, tags, children, onClick, icon }: ItemCardProps) {
+export function ItemCard({ title, subtitle, tags, children, onClick, icon, item }: ItemCardProps) {
+  const { selectedItems, toggleSelection } = useSelection()
+  const isSelected = item ? selectedItems.some(selectedItem => selectedItem.id === item.id) : false
+
+  const handleClick = (e: React.MouseEvent) => {
+    // Prevent card click if clicking the checkbox
+    if ((e.target as HTMLElement).closest('.checkbox-container')) {
+      return
+    }
+    onClick?.()
+  }
+
+  const handleCheckboxChange = () => {
+    if (item) {
+      toggleSelection(item)
+    }
+  }
+
   return (
     <div 
       className="bg-white rounded-xl border border-gray-100 shadow-card hover:shadow-card-hover p-5 
-                transition-all duration-200 ease-in-out transform hover:-translate-y-1 cursor-pointer"
-      onClick={onClick}
+                transition-all duration-200 ease-in-out transform hover:-translate-y-1 cursor-pointer relative"
+      onClick={handleClick}
     >
+      {item && (
+        <div className="checkbox-container absolute top-4 right-4 z-10">
+          <Checkbox 
+            checked={isSelected} 
+            onChange={handleCheckboxChange}
+          />
+        </div>
+      )}
       <div className="flex items-start space-x-4">
         {icon && (
           <div className="flex-shrink-0 icon-container bg-gray-50 p-2 rounded-lg w-10 h-10">

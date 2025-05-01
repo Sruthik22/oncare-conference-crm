@@ -17,17 +17,18 @@ import type { Attendee } from '@/types'
 import { supabase } from '@/lib/supabase'
 import ApolloIntegration from './ApolloIntegration'
 import { ApolloEnrichmentResponse } from '@/lib/apollo'
+import { handleEnrichmentComplete as enrichAttendee } from '@/lib/enrichment'
 
 interface AttendeeDetailProps {
   attendee: Attendee
-  onUpdate: (updatedAttendee: Attendee) => void
   conferenceName?: string
   onBack?: () => void
+  onUpdate?: (updatedAttendee: Attendee) => void
 }
 
-export const AttendeeDetail = ({ attendee, onUpdate, conferenceName, onBack }: AttendeeDetailProps) => {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editData, setEditData] = useState<Attendee | null>(null)
+export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate }: AttendeeDetailProps) => {
+  const [isEditing, setIsEditing] = useState(true)
+  const [editData, setEditData] = useState<Attendee | null>({ ...attendee })
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -45,8 +46,11 @@ export const AttendeeDetail = ({ attendee, onUpdate, conferenceName, onBack }: A
       setIsSaving(true)
       setError(null)
       
-      // Only include fields that match our Attendee type
-      const { ...updateData } = editData
+      // Create a new object without relationship fields that don't exist as columns in the database
+      const updateData = { ...editData }
+      // Remove relationship fields that shouldn't be sent to the database
+      delete updateData.attendee_conferences
+      delete updateData.health_systems
       
       const { data, error: updateError } = await supabase
         .from('attendees')
@@ -63,9 +67,12 @@ export const AttendeeDetail = ({ attendee, onUpdate, conferenceName, onBack }: A
         throw new Error('No data returned after update')
       }
       
-      // Call the update callback to update parent state with the first result
-      onUpdate(data[0])
       setIsEditing(false)
+      
+      // If update was successful and there's an onUpdate callback, call it
+      if (data.length > 0 && onUpdate) {
+        onUpdate(data[0])
+      }
     } catch (err) {
       console.error('Full error object:', err)
       setError(err instanceof Error ? err.message : 'An error occurred while saving data')
@@ -106,39 +113,31 @@ export const AttendeeDetail = ({ attendee, onUpdate, conferenceName, onBack }: A
     return colors[index % colors.length]
   }
 
-  const handleEnrichmentComplete = async (enrichedData: ApolloEnrichmentResponse[]) => {
-    if (enrichedData.length > 0) {
-      try {
-        const enriched = enrichedData[0];
-        // Only update fields that exist in our schema and have values
-        const updateData: Partial<Attendee> = {
-          id: attendee.id,
-        };
+  const handleEnrichmentComplete = async (enrichedData: ApolloEnrichmentResponse) => {
+    if (!enrichedData || !enrichedData.matches || enrichedData.matches.length === 0) {
+      setError('No enriched data received or no matches found');
+      return;
+    }
 
-        if (enriched.person.email) updateData.email = enriched.person.email;
-        if (enriched.person.title) updateData.title = enriched.person.title;
-        if (enriched.person.phone) updateData.phone = enriched.person.phone;
-        if (enriched.person.linkedinUrl) updateData.linkedin_url = enriched.person.linkedinUrl;
-
-        // Update in Supabase
-        const { data, error } = await supabase
-          .from('attendees')
-          .update(updateData)
-          .eq('id', attendee.id)
-          .select()
-          .single();
-
-        if (error) {
-          console.error('Error updating attendee with enriched data:', error);
-          return;
+    try {
+      await enrichAttendee(
+        enrichedData,
+        [attendee],
+        (updatedAttendees: Attendee[]) => {
+          if (updatedAttendees.length > 0) {
+            // Update the local attendee state with the enriched data
+            const updatedAttendee = updatedAttendees[0];
+            // Notify parent component of the update
+            onUpdate?.(updatedAttendee);
+            setError(null);
+          } else {
+            setError('No attendees were updated');
+          }
         }
-
-        if (data) {
-          onUpdate(data);
-        }
-      } catch (err) {
-        console.error('Error in handleEnrichmentComplete:', err);
-      }
+      );
+    } catch (err) {
+      console.error('AttendeeDetail - Error in handleEnrichmentComplete:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update attendee with enriched data');
     }
   };
 

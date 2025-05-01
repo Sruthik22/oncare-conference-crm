@@ -45,40 +45,45 @@ export interface ApolloContact {
 }
 
 export interface ApolloEnrichmentResponse {
-  person: ApolloContact;
-  organization: {
-    id?: string;
+  status: string;
+  error_code: string | null;
+  error_message: string | null;
+  total_requested_enrichments: number;
+  unique_enriched_records: number;
+  missing_records: number;
+  credits_consumed: number;
+  matches: Array<{
+    id: string;
+    first_name: string;
+    last_name: string;
     name: string;
-    website_url: string;
-    linkedin_url?: string;
-    twitter_url?: string;
-    facebook_url?: string;
-    industry: string;
-    estimated_num_employees: number;
-    founded_year?: number;
-    annual_revenue: number;
-    total_funding: number;
-    raw_address: string;
-    raw_address_2: string;
-    raw_city: string;
-    short_description: string;
-    keywords?: string[];
-    technologies?: string[];
-  };
+    linkedin_url: string;
+    title: string;
+    headline: string;
+    email_status: string;
+    photo_url: string;
+    email: string;
+    phone: string;
+    organization: {
+      name: string;
+      website_url: string;
+      industry: string;
+      estimated_num_employees: number;
+    };
+    employment_history: Array<{
+      organization_name: string;
+      title: string;
+      start_date: string;
+      end_date: string | null;
+      current: boolean;
+    }>;
+  }>;
 }
 
 interface ApolloSearchParams {
   firstName?: string;
   lastName?: string;
   organization?: string;
-}
-
-interface ApolloJob {
-  title: string;
-  organization_name: string;
-  start_date: string;
-  end_date: string | null;
-  current: boolean;
 }
 
 export interface ApolloList {
@@ -139,85 +144,60 @@ export class ApolloService {
     return ApolloService.instance;
   }
 
-  async enrichContacts(contacts: ApolloSearchParams[]): Promise<ApolloEnrichmentResponse[]> {
+  async enrichContacts(contacts: ApolloSearchParams[]): Promise<ApolloEnrichmentResponse> {
     try {
-      const enrichedData: ApolloEnrichmentResponse[] = [];
+      const BATCH_SIZE = 10;
+      const batches = [];
       
-      for (const contact of contacts) {
-        const requestData: Record<string, string> = {};
-        
-        if (contact.firstName) requestData.first_name = contact.firstName;
-        if (contact.lastName) requestData.last_name = contact.lastName;
-        if (contact.organization) requestData.organization_name = contact.organization;
-        
+      // Split contacts into batches of 10
+      for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+        batches.push(contacts.slice(i, i + BATCH_SIZE));
+      }
+
+      const allResults = [];
+      
+      // Process each batch
+      for (const batch of batches) {
+        const details = batch.map(contact => ({
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+          organization_name: contact.organization || '',
+        }));
+
         const response = await this.client.post('', {
-          endpoint: 'people/match',
+          endpoint: 'people/bulk_match',
           method: 'POST',
-          data: requestData
+          data: { details }
         });
-        
-        if (response.data?.person) {
-          const person = response.data.person;
-          const org = person.organization || {};
-          
-          enrichedData.push({
-            person: {
-              id: person.id,
-              firstName: person.first_name,
-              lastName: person.last_name,
-              name: person.name,
-              email: person.email,
-              email_status: person.email_status,
-              title: person.title,
-              headline: person.headline,
-              organization: org.name || '',
-              phone: person.phone || '',
-              linkedinUrl: person.linkedin_url || '',
-              photo_url: person.photo_url,
-              twitter_url: person.twitter_url,
-              facebook_url: person.facebook_url,
-              github_url: person.github_url,
-              city: person.city,
-              state: person.state,
-              country: person.country,
-              departments: person.departments,
-              subdepartments: person.subdepartments,
-              functions: person.functions,
-              seniority: person.seniority,
-              employment_history: person.employment_history?.map((job: ApolloJob) => ({
-                title: job.title,
-                organization_name: job.organization_name,
-                start_date: job.start_date,
-                end_date: job.end_date,
-                current: job.current
-              }))
-            },
-            organization: {
-              id: org.id,
-              name: org.name || '',
-              website_url: org.website_url || '',
-              linkedin_url: org.linkedin_url,
-              twitter_url: org.twitter_url,
-              facebook_url: org.facebook_url,
-              industry: org.industry || '',
-              estimated_num_employees: org.estimated_num_employees || 0,
-              founded_year: org.founded_year,
-              annual_revenue: org.annual_revenue || 0,
-              total_funding: org.total_funding || 0,
-              raw_address: org.raw_address || '',
-              raw_address_2: org.raw_address_2 || '',
-              raw_city: org.raw_city || '',
-              short_description: org.short_description || '',
-              keywords: org.keywords,
-              technologies: org.technology_names
-            }
-          });
+
+        if (response.data) {
+          allResults.push(response.data);
         }
       }
 
-      return enrichedData;
-    } catch (error) {
+      // Get all non-null matches from all results
+      const allMatches = allResults
+        .filter(result => result && result.matches)
+        .flatMap(result => result.matches)
+        .filter(match => match && Object.values(match).some(value => value !== null));
+
+      return {
+        status: 'success',
+        error_code: null,
+        error_message: null,
+        total_requested_enrichments: contacts.length,
+        unique_enriched_records: allMatches.length,
+        missing_records: contacts.length - allMatches.length,
+        credits_consumed: contacts.length,
+        matches: allMatches
+      };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
       console.error('Error enriching contacts:', error);
+      if (error.response) {
+        console.error('Error response data:', error.response.data);
+        console.error('Error response status:', error.response.status);
+      }
       throw error;
     }
   }
@@ -240,7 +220,7 @@ export class ApolloService {
         }
       });
       
-      return response.data.contacts || [];
+      return response.data || [];
     } catch (error) {
       console.error('Error searching Apollo contacts:', error);
       throw error;

@@ -12,6 +12,7 @@ import { ViewSettingsMenu } from '@/components/ViewSettingsMenu'
 import { ViewToggle } from '@/components/ViewToggle'
 import { TabNavigation } from '@/components/TabNavigation'
 import { PropertiesMenu } from '@/components/PropertiesMenu'
+import { SelectionProvider, useSelection } from '@/lib/context/SelectionContext'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 import { ColumnDef, CellContext } from '@tanstack/react-table'
 import { 
@@ -31,6 +32,40 @@ import { useDataFetching } from '@/hooks/useDataFetching'
 import { useFiltering } from '@/hooks/useFiltering'
 import { useColumnManagement } from '@/hooks/useColumnManagement'
 import { supabase } from '@/lib/supabase'
+import { ActionBar } from '@/components/ActionBar'
+import { ApolloEnrichmentResponse } from '@/lib/apollo'
+import { handleEnrichmentComplete } from '@/lib/enrichment'
+
+// SelectAllButton component
+function SelectAllButton({ 
+  items
+}: { 
+  items: Attendee[] | HealthSystem[] | Conference[]
+}) {
+  const { selectAll, deselectAll, selectedItems } = useSelection()
+  
+  // Check if all items are already selected
+  const allSelected = items.length > 0 && items.every(item => 
+    selectedItems.some(selected => selected.id === item.id)
+  );
+  
+  const handleClick = () => {
+    if (allSelected) {
+      deselectAll();
+    } else {
+      selectAll(items);
+    }
+  };
+  
+  return (
+    <button
+      onClick={handleClick}
+      className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
+    >
+      {allSelected ? 'Deselect All' : 'Select All'}
+    </button>
+  )
+}
 
 export default function Home() {
   const [view, setView] = useState<'table' | 'cards'>('cards')
@@ -211,22 +246,6 @@ export default function Home() {
     setActiveFilters(filters)
   }
 
-  // Handle update from detail components
-  const handleAttendeeUpdate = async (updatedAttendee: Attendee) => {
-    const { error } = await supabase
-      .from('attendees')
-      .update(updatedAttendee)
-      .eq('id', updatedAttendee.id)
-
-    if (error) {
-      console.error('Error updating attendee:', error)
-      return
-    }
-
-    setAttendees(prev => prev.map(a => a.id === updatedAttendee.id ? updatedAttendee : a))
-    setSelectedItem(updatedAttendee)
-  }
-
   const handleConferenceUpdate = async (updatedConference: Conference) => {
     const { error } = await supabase
       .from('conferences')
@@ -257,6 +276,14 @@ export default function Home() {
     setSelectedItem(updatedHealthSystem)
   }
 
+  const handleEnrichmentCompleteWrapper = async (enrichedData: ApolloEnrichmentResponse) => {
+    try {
+      await handleEnrichmentComplete(enrichedData, attendees, setAttendees);
+    } catch (error) {
+      console.error('Error in enrichment wrapper:', error);
+    }
+  };
+
   const renderSelectedItemDetail = () => {
     if (!selectedItem) return null
 
@@ -265,8 +292,15 @@ export default function Home() {
       const conferenceName = attendee.attendee_conferences?.[0]?.conferences?.name || 'Unknown Conference';
       return <AttendeeDetail 
         attendee={attendee} 
-        onUpdate={handleAttendeeUpdate} 
         conferenceName={conferenceName}
+        onUpdate={(updatedAttendee) => {
+          // Update the selected item with the enriched data
+          setSelectedItem(updatedAttendee);
+          // Update the attendees list
+          setAttendees(prevAttendees => 
+            prevAttendees.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
+          );
+        }}
       />
     } else if ('start_date' in selectedItem) {
       return <ConferenceDetail conference={selectedItem} onUpdate={handleConferenceUpdate} />
@@ -333,8 +367,10 @@ export default function Home() {
         <ItemCard
           key={attendee.id}
           title={`${attendee.first_name} ${attendee.last_name}`}
+          subtitle={attendee.title}
           icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(attendee)}
+          item={attendee}
         >
           <div className="space-y-2">
             {getVisibleFields(attendee).map((field, index) => (
@@ -361,6 +397,7 @@ export default function Home() {
           subtitle={`${healthSystem.city}, ${healthSystem.state}`}
           icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(healthSystem)}
+          item={healthSystem}
         >
           <div className="space-y-2">
             {getVisibleFields(healthSystem).map((field, index) => (
@@ -379,33 +416,30 @@ export default function Home() {
       ))
     }
 
-    if (activeTab === 'conferences') {
-      return filteredConferences.map((conference) => (
-        <ItemCard
-          key={conference.id}
-          title={conference.name}
-          subtitle={conference.location}
-          icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
-          onClick={() => setSelectedItem(conference)}
-        >
-          <div className="space-y-2">
-            {getVisibleFields(conference).map((field, index) => (
-              <div key={index} className="flex items-start">
-                <div className="flex items-center min-w-[100px] text-gray-500">
-                  <div className="w-5 h-5 mr-2">
-                    {field.icon}
-                  </div>
-                  <span>{field.label}:</span>
+    return filteredConferences.map((conference) => (
+      <ItemCard
+        key={conference.id}
+        title={conference.name}
+        subtitle={conference.location}
+        icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
+        onClick={() => setSelectedItem(conference)}
+        item={conference}
+      >
+        <div className="space-y-2">
+          {getVisibleFields(conference).map((field, index) => (
+            <div key={index} className="flex items-start">
+              <div className="flex items-center min-w-[100px] text-gray-500">
+                <div className="w-5 h-5 mr-2">
+                  {field.icon}
                 </div>
-                <span className="text-gray-900 ml-2">{field.value}</span>
+                <span>{field.label}:</span>
               </div>
-            ))}
-          </div>
-        </ItemCard>
-      ))
-    }
-
-    return null
+              <span className="text-gray-900 ml-2">{field.value}</span>
+            </div>
+          ))}
+        </div>
+      </ItemCard>
+    ))
   }
 
   const renderContent = () => {
@@ -442,15 +476,25 @@ export default function Home() {
       )
     }
 
+    // Get current filtered items based on active tab
+    const currentItems = activeTab === 'attendees' 
+      ? filteredAttendees 
+      : activeTab === 'health-systems' 
+        ? filteredHealthSystems 
+        : filteredConferences;
+
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-40">
-          <SearchBar 
-            placeholder={`Search ${activeTab === 'health-systems' ? 'Health Systems' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}...`}
-            onSearch={handleSearch}
-          />
+          <div className="flex items-center gap-4">
+            <SearchBar 
+              placeholder={`Search ${activeTab === 'health-systems' ? 'Health Systems' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}...`}
+              onSearch={handleSearch}
+            />
+          </div>
           
           <div className="flex items-center gap-4 relative z-40">
+            <SelectAllButton items={currentItems} />
             <FilterMenu
               columns={getAllColumns.map(col => ({
                 id: String(col.id),
@@ -554,24 +598,27 @@ export default function Home() {
   }, [])
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="flex h-screen">
-        <TabNavigation
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          counts={{
-            attendees: filteredAttendees.length,
-            'health-systems': filteredHealthSystems.length,
-            conferences: filteredConferences.length,
-          }}
-        />
-        
-        <div className="flex-1 overflow-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-            {renderContent()}
+    <SelectionProvider>
+      <main className="min-h-screen bg-gray-50">
+        <div className="flex h-screen">
+          <TabNavigation
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            counts={{
+              attendees: filteredAttendees.length,
+              'health-systems': filteredHealthSystems.length,
+              conferences: filteredConferences.length,
+            }}
+          />
+          
+          <div className="flex-1 overflow-auto">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24">
+              {renderContent()}
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+        <ActionBar onEnrichmentComplete={handleEnrichmentCompleteWrapper} />
+      </main>
+    </SelectionProvider>
   )
 } 
