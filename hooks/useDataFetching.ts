@@ -59,8 +59,21 @@ export function useDataFetching(): UseDataFetchingResult {
       setIsLoading(true)
       setError(null)
 
-      // Fetch all attendees with health system info
-      const attendeesQuery = `*, health_systems (id, name, definitive_id, website, address, city, state, zip)`
+      // Fetch all attendees with health system and conference info
+      const attendeesQuery = `
+        *,
+        health_systems (id, name, definitive_id, website, address, city, state, zip),
+        attendee_conferences!inner (
+          conference_id,
+          conferences (
+            id,
+            name,
+            start_date,
+            end_date,
+            location
+          )
+        )
+      `
       const attendeesData = await fetchAllRecords<Attendee>('attendees', attendeesQuery)
       
       // Fetch all conferences

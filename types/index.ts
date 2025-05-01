@@ -31,6 +31,14 @@ export interface Conference {
   created_at: string
 }
 
+export interface AttendeeConference {
+  id: string
+  attendee_id: string
+  conference_id: string
+  created_at: string
+  conferences?: Conference
+}
+
 export interface Attendee {
   id: string
   first_name: string
@@ -46,11 +54,5 @@ export interface Attendee {
   notes?: string
   created_at: string
   updated_at: string
-}
-
-export interface AttendeeConference {
-  id: string
-  attendee_id: string
-  conference_id: string
-  created_at: string
+  attendee_conferences?: AttendeeConference[]
 } 

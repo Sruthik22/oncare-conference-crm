@@ -261,7 +261,13 @@ export default function Home() {
     if (!selectedItem) return null
 
     if ('first_name' in selectedItem) {
-      return <AttendeeDetail attendee={selectedItem} onUpdate={handleAttendeeUpdate} />
+      const attendee = selectedItem as Attendee;
+      const conferenceName = attendee.attendee_conferences?.[0]?.conferences?.name || 'Unknown Conference';
+      return <AttendeeDetail 
+        attendee={attendee} 
+        onUpdate={handleAttendeeUpdate} 
+        conferenceName={conferenceName}
+      />
     } else if ('start_date' in selectedItem) {
       return <ConferenceDetail conference={selectedItem} onUpdate={handleConferenceUpdate} />
     } else {

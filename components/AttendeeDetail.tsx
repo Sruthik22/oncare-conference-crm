@@ -10,17 +10,22 @@ import {
   XCircleIcon,
   DocumentTextIcon,
   AcademicCapIcon,
+  ArrowLeftIcon,
 } from '@heroicons/react/24/outline'
 import { Icon } from '@/components/Icon'
 import type { Attendee } from '@/types'
 import { supabase } from '@/lib/supabase'
+import ApolloIntegration from './ApolloIntegration'
+import { ApolloEnrichmentResponse } from '@/lib/apollo'
 
 interface AttendeeDetailProps {
   attendee: Attendee
   onUpdate: (updatedAttendee: Attendee) => void
+  conferenceName?: string
+  onBack?: () => void
 }
 
-export const AttendeeDetail = ({ attendee, onUpdate }: AttendeeDetailProps) => {
+export const AttendeeDetail = ({ attendee, onUpdate, conferenceName, onBack }: AttendeeDetailProps) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editData, setEditData] = useState<Attendee | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -100,6 +105,42 @@ export const AttendeeDetail = ({ attendee, onUpdate }: AttendeeDetailProps) => {
     ]
     return colors[index % colors.length]
   }
+
+  const handleEnrichmentComplete = async (enrichedData: ApolloEnrichmentResponse[]) => {
+    if (enrichedData.length > 0) {
+      try {
+        const enriched = enrichedData[0];
+        // Only update fields that exist in our schema and have values
+        const updateData: Partial<Attendee> = {
+          id: attendee.id,
+        };
+
+        if (enriched.person.email) updateData.email = enriched.person.email;
+        if (enriched.person.title) updateData.title = enriched.person.title;
+        if (enriched.person.phone) updateData.phone = enriched.person.phone;
+        if (enriched.person.linkedinUrl) updateData.linkedin_url = enriched.person.linkedinUrl;
+
+        // Update in Supabase
+        const { data, error } = await supabase
+          .from('attendees')
+          .update(updateData)
+          .eq('id', attendee.id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Error updating attendee with enriched data:', error);
+          return;
+        }
+
+        if (data) {
+          onUpdate(data);
+        }
+      } catch (err) {
+        console.error('Error in handleEnrichmentComplete:', err);
+      }
+    }
+  };
 
   if (isEditing && editData) {
     // Edit mode - render form with inputs
@@ -322,14 +363,25 @@ export const AttendeeDetail = ({ attendee, onUpdate }: AttendeeDetailProps) => {
             </div>
           </div>
           
-          <button 
-            onClick={handleEditClick}
-            className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-            title="Edit"
-          >
-            <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">Edit</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button 
+                onClick={onBack}
+                className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-150"
+              >
+                <ArrowLeftIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+                Back to List
+              </button>
+            )}
+            <button 
+              onClick={handleEditClick}
+              className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+              title="Edit"
+            >
+              <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only">Edit</span>
+            </button>
+          </div>
         </div>
       </div>
       
@@ -427,6 +479,15 @@ export const AttendeeDetail = ({ attendee, onUpdate }: AttendeeDetailProps) => {
             </div>
           </div>
         )}
+      </div>
+      
+      {/* Add Apollo Integration section */}
+      <div className="px-6 py-5 border-t border-gray-200">
+        <ApolloIntegration
+          selectedAttendees={[attendee]}
+          conferenceName={conferenceName || 'Unknown Conference'}
+          onEnrichmentComplete={handleEnrichmentComplete}
+        />
       </div>
     </div>
   )
