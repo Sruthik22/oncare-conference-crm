@@ -1,22 +1,24 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Attendee, HealthSystem, Conference } from '@/types'
+import { useAuth } from '@/hooks/useAuth'
 
 // Helper function to fetch all records using pagination
 async function fetchAllRecords<T>(
   table: string, 
   query: string, 
-  pageSize = 1000
+  pageSize = 1000,
 ): Promise<T[]> {
   let allData: T[] = []
   let page = 0
   let hasMore = true
+  const client = supabase
 
   while (hasMore) {
     const from = page * pageSize
     const to = from + pageSize - 1
     
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from(table)
       .select(query, { count: 'exact' })
       .range(from, to)
@@ -53,11 +55,21 @@ export function useDataFetching(): UseDataFetchingResult {
   const [conferences, setConferences] = useState<Conference[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { session } = useAuth() // Get authentication status
 
   const fetchData = async () => {
     try {
       setIsLoading(true)
       setError(null)
+
+      // If not authenticated, early return with empty data
+      if (!session) {
+        setAttendees([])
+        setConferences([])
+        setHealthSystems([])
+        setError("Authentication required to access data")
+        return
+      }
 
       // Fetch all attendees with health system and conference info
       const attendeesQuery = `
@@ -74,13 +86,13 @@ export function useDataFetching(): UseDataFetchingResult {
           )
         )
       `
-      const attendeesData = await fetchAllRecords<Attendee>('attendees', attendeesQuery)
+      const attendeesData = await fetchAllRecords<Attendee>('attendees', attendeesQuery, 1000)
       
       // Fetch all conferences
-      const conferencesData = await fetchAllRecords<Conference>('conferences', '*')
+      const conferencesData = await fetchAllRecords<Conference>('conferences', '*', 1000)
       
       // Fetch all health systems
-      const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', '*')
+      const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', '*', 1000)
 
       // Update state with fetched data
       setAttendees(attendeesData)
@@ -97,7 +109,7 @@ export function useDataFetching(): UseDataFetchingResult {
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [session]) // Re-fetch when authentication state changes
 
   return {
     attendees,

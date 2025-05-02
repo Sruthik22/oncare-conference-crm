@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const APOLLO_API_URL = process.env.NEXT_PUBLIC_APOLLO_API_URL;
-const APOLLO_API_KEY = process.env.NEXT_PUBLIC_APOLLO_API_KEY;
+const APOLLO_API_URL = process.env.APOLLO_API_URL;
+const APOLLO_API_KEY = process.env.APOLLO_API_KEY;
 
 if (!APOLLO_API_KEY) {
   console.error('Missing Apollo API key in environment variables');

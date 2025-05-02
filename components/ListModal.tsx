@@ -1,22 +1,28 @@
 import React, { useState, useEffect, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { apolloService, ApolloList } from '@/lib/apollo';
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { PlusIcon } from '@heroicons/react/24/outline';
+import { supabase } from '@/lib/supabase';
 
-interface ApolloListModalProps {
+export interface List {
+  id: string;
+  name: string;
+  count?: number;
+}
+
+interface ListModalProps {
   isOpen: boolean;
   onClose: () => void;
   onListSelected: (listName: string) => void;
   defaultListName?: string;
+  refreshLists?: () => Promise<void>;
 }
 
-export default function ApolloListModal({ isOpen, onClose, onListSelected, defaultListName }: ApolloListModalProps) {
-  const [lists, setLists] = useState<ApolloList[]>([]);
+export function ListModal({ isOpen, onClose, onListSelected, defaultListName, refreshLists }: ListModalProps) {
+  const [lists, setLists] = useState<List[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newListName, setNewListName] = useState(defaultListName || '');
   const [isCreatingList, setIsCreatingList] = useState(false);
-  const [isDeletingList, setIsDeletingList] = useState(false);
 
   useEffect(() => {
     if (defaultListName) {
@@ -34,8 +40,34 @@ export default function ApolloListModal({ isOpen, onClose, onListSelected, defau
     setIsLoading(true);
     setError(null);
     try {
-      const fetchedLists = await apolloService.getLists();
-      setLists(fetchedLists);
+      // Fetch all lists
+      const { data: listsData, error: listsError } = await supabase
+        .from('lists')
+        .select('id, name');
+      
+      if (listsError) throw new Error(listsError.message);
+      
+      if (!listsData) {
+        setLists([]);
+        return;
+      }
+      
+      // Get counts for each list
+      const listsWithCounts = await Promise.all(
+        listsData.map(async (list) => {
+          const { count, error: countError } = await supabase
+            .from('attendee_lists')
+            .select('id', { count: 'exact', head: true })
+            .eq('list_id', list.id);
+          
+          return {
+            ...list,
+            count: countError ? 0 : count || 0
+          };
+        })
+      );
+      
+      setLists(listsWithCounts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch lists');
     } finally {
@@ -43,7 +75,7 @@ export default function ApolloListModal({ isOpen, onClose, onListSelected, defau
     }
   };
 
-  const handleCreateList = () => {
+  const handleCreateList = async () => {
     if (!newListName.trim()) {
       setError('List name is required');
       return;
@@ -52,6 +84,26 @@ export default function ApolloListModal({ isOpen, onClose, onListSelected, defau
     setIsCreatingList(true);
     setError(null);
     try {
+      // Create a list in the database
+      const { error: newListError } = await supabase
+        .from('lists')
+        .insert({ name: newListName.trim() })
+        .select('id')
+        .single();
+      
+      if (newListError) {
+        throw new Error(newListError.message);
+      }
+      
+      // First refresh the lists in the parent components
+      if (refreshLists) {
+        await refreshLists();
+      }
+      
+      // Then refresh the local list
+      await fetchLists();
+      
+      // Call the onListSelected callback provided by the parent
       onListSelected(newListName.trim());
       setNewListName('');
       onClose();
@@ -62,22 +114,19 @@ export default function ApolloListModal({ isOpen, onClose, onListSelected, defau
     }
   };
 
-  const handleDeleteList = async (listId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent triggering the list selection
-
-    if (isDeletingList || !confirm('Are you sure you want to delete this list? This action cannot be undone.')) {
-      return;
-    }
-
-    setIsDeletingList(true);
-    setError(null);
+  const handleSelectList = async (listName: string) => {
     try {
-      await apolloService.deleteList(listId);
-      await fetchLists(); // Refresh the lists
+      // Call the onListSelected callback provided by the parent
+      onListSelected(listName);
+      
+      // First refresh the lists in the parent components
+      if (refreshLists) {
+        await refreshLists();
+      }
+      
+      onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete list');
-    } finally {
-      setIsDeletingList(false);
+      console.error('Error selecting list:', err);
     }
   };
 
@@ -153,26 +202,14 @@ export default function ApolloListModal({ isOpen, onClose, onListSelected, defau
                   ) : (
                     <div className="max-h-60 overflow-y-auto">
                       {lists.map((list) => (
-                        <div key={list.id} className="flex items-center">
-                          <button
-                            onClick={() => {
-                              onListSelected(list.name);
-                              onClose();
-                            }}
-                            className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-md text-sm text-gray-700 flex items-center justify-between"
-                          >
-                            <span>{list.name}</span>
-                            <span className="text-gray-500 text-xs">{list.count} contacts</span>
-                          </button>
-                          <button
-                            onClick={(e) => handleDeleteList(list.id, e)}
-                            disabled={isDeletingList}
-                            className="ml-1 p-1 text-gray-400 hover:text-red-500 rounded-md"
-                            title="Delete list"
-                          >
-                            <TrashIcon className="h-4 w-4" />
-                          </button>
-                        </div>
+                        <button
+                          key={list.id}
+                          onClick={() => handleSelectList(list.name)}
+                          className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-md text-sm text-gray-700 flex items-center justify-between"
+                        >
+                          <span>{list.name}</span>
+                          <span className="text-gray-500 text-xs">{list.count} contacts</span>
+                        </button>
                       ))}
                     </div>
                   )}

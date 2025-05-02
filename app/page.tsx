@@ -13,6 +13,8 @@ import { ViewToggle } from '@/components/ViewToggle'
 import { TabNavigation } from '@/components/TabNavigation'
 import { PropertiesMenu } from '@/components/PropertiesMenu'
 import { SelectionProvider, useSelection } from '@/lib/context/SelectionContext'
+import { Auth } from '@/components/Auth'
+import { useAuth } from '@/hooks/useAuth'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 import { ColumnDef, CellContext } from '@tanstack/react-table'
 import { 
@@ -35,6 +37,8 @@ import { supabase } from '@/lib/supabase'
 import { ActionBar } from '@/components/ActionBar'
 import { ApolloEnrichmentResponse } from '@/lib/apollo'
 import { handleEnrichmentComplete } from '@/lib/enrichment'
+import { DeleteResultsDialog } from '@/components/DeleteResultsDialog'
+import Image from 'next/image'
 
 // SelectAllButton component
 function SelectAllButton({ 
@@ -80,6 +84,16 @@ export default function Home() {
     value: string
   }>>([])
   const [selectedItem, setSelectedItem] = useState<Attendee | HealthSystem | Conference | null>(null)
+  const [showDeleteResults, setShowDeleteResults] = useState(false)
+  const [deleteResults, setDeleteResults] = useState<Array<{
+    attendee: Attendee
+    success: boolean
+    error?: string
+  }>>([])
+  const [activeListId, setActiveListId] = useState<string | null>(null)
+  const [listFilteredAttendees, setListFilteredAttendees] = useState<Attendee[]>([])
+  const [lists, setLists] = useState<Array<{ id: string, name: string, count: number }>>([])
+  const { user, isLoading: authLoading } = useAuth()
 
   // Use the data fetching hook
   const { 
@@ -216,7 +230,7 @@ export default function Home() {
 
   // Use the filtering hook for each data type
   const filteredAttendees = useFiltering({
-    data: attendees,
+    data: activeListId ? listFilteredAttendees : attendees,
     searchTerm,
     activeFilters,
   })
@@ -284,6 +298,61 @@ export default function Home() {
     }
   };
 
+  // Add a function to handle bulk deletion of attendees
+  const handleBulkDelete = async (attendeesToDelete: Attendee[]) => {
+    if (!attendeesToDelete || attendeesToDelete.length === 0) return
+    
+    const results: Array<{
+      attendee: Attendee
+      success: boolean
+      error?: string
+    }> = []
+    
+    // Process each attendee sequentially
+    for (const attendee of attendeesToDelete) {
+      try {
+        const { error } = await supabase
+          .from('attendees')
+          .delete()
+          .eq('id', attendee.id)
+        
+        if (error) {
+          console.error(`Error deleting attendee ${attendee.id}:`, error)
+          results.push({
+            attendee,
+            success: false,
+            error: error.message
+          })
+        } else {
+          results.push({
+            attendee,
+            success: true
+          })
+        }
+      } catch (err) {
+        console.error(`Unexpected error deleting attendee ${attendee.id}:`, err)
+        results.push({
+          attendee,
+          success: false,
+          error: err instanceof Error ? err.message : 'An unexpected error occurred'
+        })
+      }
+    }
+    
+    // Store results and show the dialog
+    setDeleteResults(results)
+    setShowDeleteResults(true)
+    
+    // Update the attendees list by removing successfully deleted attendees
+    const successfullyDeletedIds = results
+      .filter(result => result.success)
+      .map(result => result.attendee.id)
+    
+    setAttendees(prevAttendees => 
+      prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
+    )
+  }
+  
   const renderSelectedItemDetail = () => {
     if (!selectedItem) return null
 
@@ -293,12 +362,21 @@ export default function Home() {
       return <AttendeeDetail 
         attendee={attendee} 
         conferenceName={conferenceName}
+        onBack={() => setSelectedItem(null)}
         onUpdate={(updatedAttendee) => {
           // Update the selected item with the enriched data
           setSelectedItem(updatedAttendee);
           // Update the attendees list
           setAttendees(prevAttendees => 
             prevAttendees.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
+          );
+        }}
+        onDelete={(deletedAttendeeId) => {
+          // Clear the selected item
+          setSelectedItem(null);
+          // Remove the deleted attendee from the list
+          setAttendees(prevAttendees => 
+            prevAttendees.filter(a => a.id !== deletedAttendeeId)
           );
         }}
       />
@@ -443,6 +521,14 @@ export default function Home() {
   }
 
   const renderContent = () => {
+    // Get current filtered items based on active tab
+    const currentItems = activeTab === 'attendees' 
+      ? filteredAttendees 
+      : activeTab === 'health-systems' 
+        ? filteredHealthSystems 
+        : filteredConferences;
+
+    // Show loading indicator
     if (isLoading) {
       return (
         <div className="flex items-center justify-center h-64">
@@ -451,6 +537,7 @@ export default function Home() {
       )
     }
 
+    // Show error message
     if (error) {
       return (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 animate-fade-in">
@@ -476,24 +563,36 @@ export default function Home() {
       )
     }
 
-    // Get current filtered items based on active tab
-    const currentItems = activeTab === 'attendees' 
-      ? filteredAttendees 
-      : activeTab === 'health-systems' 
-        ? filteredHealthSystems 
-        : filteredConferences;
-
     return (
       <div className="space-y-6 animate-fade-in">
+        {activeListId && activeTab === 'attendees' && (
+          <div className="bg-indigo-50 px-4 py-2 border-b border-indigo-100 flex items-center justify-between">
+            <div className="flex items-center">
+              <span className="text-sm text-indigo-700">Filtered by list</span>
+              <span className="ml-2 inline-flex items-center rounded-md bg-indigo-100 px-2 py-1 text-xs font-medium text-indigo-700">
+                {lists.find((list) => list.id === activeListId)?.name || 'Selected list'}
+              </span>
+            </div>
+            <button 
+              onClick={() => handleListSelect(null)}
+              className="text-indigo-700 hover:text-indigo-900 text-sm font-medium"
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-40">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 w-full lg:max-w-xl">
             <SearchBar 
               placeholder={`Search ${activeTab === 'health-systems' ? 'Health Systems' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}...`}
               onSearch={handleSearch}
+              onFilterChange={handleFilterChange}
+              activeTab={activeTab}
+              isLoading={isLoading}
             />
           </div>
           
-          <div className="flex items-center gap-4 relative z-40">
+          <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 whitespace-nowrap min-w-fit lg:w-auto lg:ml-auto relative z-40">
             <SelectAllButton items={currentItems} />
             <FilterMenu
               columns={getAllColumns.map(col => ({
@@ -515,7 +614,7 @@ export default function Home() {
               onToggle={() => handleMenuToggle('properties')}
             />
             
-            <div className="flex items-center space-x-2 relative z-40">
+            <div className="flex items-center gap-4 relative z-40">
               <ViewToggle
                 view={view}
                 onViewChange={setView}
@@ -597,18 +696,166 @@ export default function Home() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const handleListSelect = async (listId: string | null) => {
+    setActiveListId(listId)
+    
+    if (!listId) {
+      // If no list is selected, clear the list filter
+      setListFilteredAttendees([])
+      return
+    }
+    
+    try {
+      // Fetch attendees that belong to the selected list
+      const { data, error } = await supabase
+        .from('attendee_lists')
+        .select(`
+          attendee_id,
+          attendees:attendee_id(*)
+        `)
+        .eq('list_id', listId)
+      
+      if (error) throw error
+      
+      if (!data || data.length === 0) {
+        setListFilteredAttendees([])
+        return
+      }
+      
+      // Extract attendees from the join query
+      const attendeesInList = data
+        .map(item => item.attendees as unknown as Attendee)
+        .filter(Boolean)
+      setListFilteredAttendees(attendeesInList)
+    } catch (err) {
+      console.error('Error fetching attendees for list:', err)
+      setListFilteredAttendees([])
+    }
+  }
+
+  // Fetch lists function to be shared between components
+  const fetchLists = async () => {
+    try {
+      // Fetch all lists
+      const { data: listsData, error: listsError } = await supabase
+        .from('lists')
+        .select('id, name')
+  
+      if (listsError) throw new Error(listsError.message)
+      
+      if (!listsData) {
+        setLists([])
+        return
+      }
+      
+      // Get counts for each list
+      const listsWithCounts = await Promise.all(
+        listsData.map(async (list) => {
+          const { count, error: countError } = await supabase
+            .from('attendee_lists')
+            .select('id', { count: 'exact', head: true })
+            .eq('list_id', list.id)
+          
+          return {
+            ...list,
+            count: countError ? 0 : count || 0
+          }
+        })
+      )
+      
+      setLists(listsWithCounts)
+    } catch (err) {
+      console.error('Failed to fetch lists', err)
+      setLists([])
+    }
+  }
+
+  // Fetch lists when component mounts
+  useEffect(() => {
+    fetchLists()
+  }, [])
+
+  // Function to handle deleting a list
+  const handleListDelete = async (listId: string) => {
+    try {
+      // First, delete all attendee_lists associations
+      const { error: deleteAssociationsError } = await supabase
+        .from('attendee_lists')
+        .delete()
+        .eq('list_id', listId);
+      
+      if (deleteAssociationsError) throw new Error(deleteAssociationsError.message);
+      
+      // Then delete the list itself
+      const { error: deleteListError } = await supabase
+        .from('lists')
+        .delete()
+        .eq('id', listId);
+      
+      if (deleteListError) throw new Error(deleteListError.message);
+      
+      // Clear the active list selection
+      setActiveListId(null);
+      
+      // Clear the filtered attendees
+      setListFilteredAttendees([]);
+      
+      // Update the lists state directly for immediate UI update
+      setLists(prevLists => prevLists.filter(list => list.id !== listId));
+      
+      // Refresh the lists to ensure data consistency
+      fetchLists();
+    } catch (err) {
+      console.error('Failed to delete list:', err);
+      alert('Failed to delete list: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
+  };
+
+  // Render a loading spinner while auth state is being determined
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-indigo-600 border-t-transparent"></div>
+      </div>
+    )
+  }
+
+  // If not authenticated, show the auth form centered on the page
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
+        <div className="w-full max-w-md bg-white p-8 rounded-lg shadow-md">
+          <div className="flex justify-center mb-8">
+            <Image 
+              src="/oncare_logo.svg" 
+              alt="Oncare Logo"
+              width={150}
+              height={48}
+              className="h-12 w-auto"
+            />
+          </div>
+          <Auth />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <SelectionProvider>
-      <main className="min-h-screen bg-gray-50">
-        <div className="flex h-screen">
-          <TabNavigation
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
+      <main className="flex h-screen flex-col">
+        <div className="flex flex-1 overflow-hidden">
+          <TabNavigation 
+            activeTab={activeTab} 
+            onTabChange={setActiveTab} 
             counts={{
-              attendees: filteredAttendees.length,
-              'health-systems': filteredHealthSystems.length,
-              conferences: filteredConferences.length,
+              attendees: attendees.length,
+              'health-systems': healthSystems.length,
+              conferences: conferences.length
             }}
+            activeListId={activeListId}
+            onListSelect={handleListSelect}
+            refreshLists={fetchLists}
+            lists={lists}
           />
           
           <div className="flex-1 overflow-auto">
@@ -617,7 +864,25 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <ActionBar onEnrichmentComplete={handleEnrichmentCompleteWrapper} />
+        
+        <DeleteResultsDialog 
+          isOpen={showDeleteResults}
+          onClose={() => setShowDeleteResults(false)}
+          results={deleteResults}
+        />
+        
+        <ActionBar 
+          onEnrichmentComplete={handleEnrichmentCompleteWrapper}
+          onDelete={handleBulkDelete}
+          conferenceName={
+            activeListId && lists.find(list => list.id === activeListId)
+              ? lists.find(list => list.id === activeListId)?.name
+              : (activeTab === 'conferences' && selectedItem ? (selectedItem as Conference).name : '')
+          }
+          activeListId={activeListId}
+          onListDelete={handleListDelete}
+          refreshLists={fetchLists}
+        />
       </main>
     </SelectionProvider>
   )

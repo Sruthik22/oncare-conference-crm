@@ -343,6 +343,18 @@ export class ApolloService {
       throw error;
     }
   }
+
+  async deleteList(listId: string): Promise<void> {
+    try {
+      await this.client.post('', {
+        endpoint: `lists/${listId}`,
+        method: 'DELETE'
+      });
+    } catch (error) {
+      console.error('Error deleting Apollo list:', error);
+      throw error;
+    }
+  }
 }
 
 export const apolloService = ApolloService.getInstance(); 

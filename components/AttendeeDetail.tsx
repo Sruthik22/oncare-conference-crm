@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { 
   UserIcon, 
   BuildingOfficeIcon, 
@@ -18,19 +18,33 @@ import { supabase } from '@/lib/supabase'
 import ApolloIntegration from './ApolloIntegration'
 import { ApolloEnrichmentResponse } from '@/lib/apollo'
 import { handleEnrichmentComplete as enrichAttendee } from '@/lib/enrichment'
+import { Dialog, Transition } from '@headlessui/react'
+import { DeleteResultsDialog } from './DeleteResultsDialog'
+
+// Define the DeleteResult type for the dialog
+interface DeleteResult {
+  attendee: Attendee
+  success: boolean
+  error?: string
+}
 
 interface AttendeeDetailProps {
   attendee: Attendee
   conferenceName?: string
   onBack?: () => void
   onUpdate?: (updatedAttendee: Attendee) => void
+  onDelete?: (deletedAttendeeId: string) => void
 }
 
-export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate }: AttendeeDetailProps) => {
+export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate, onDelete }: AttendeeDetailProps) => {
   const [isEditing, setIsEditing] = useState(true)
   const [editData, setEditData] = useState<Attendee | null>({ ...attendee })
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showDeleteResults, setShowDeleteResults] = useState(false)
+  const [deleteResults, setDeleteResults] = useState<DeleteResult[]>([])
 
   // Handle edit click
   const handleEditClick = () => {
@@ -84,6 +98,64 @@ export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate }: A
   const handleCancelEdit = () => {
     setIsEditing(false)
     setEditData(null)
+  }
+  
+  const handleDeleteConfirm = async () => {
+    try {
+      setIsDeleting(true)
+      setError(null)
+      
+      const { error: deleteError } = await supabase
+        .from('attendees')
+        .delete()
+        .eq('id', attendee.id)
+      
+      if (deleteError) {
+        console.error('Supabase delete error:', deleteError)
+        
+        // Store the failure result
+        setDeleteResults([
+          {
+            attendee,
+            success: false,
+            error: deleteError.message
+          }
+        ])
+        
+        throw deleteError
+      }
+      
+      // Store the success result
+      setDeleteResults([
+        {
+          attendee,
+          success: true
+        }
+      ])
+      
+      setShowDeleteConfirm(false)
+      setShowDeleteResults(true)
+      
+      // If delete was successful and there's an onDelete callback, call it
+      if (onDelete) {
+        onDelete(attendee.id)
+      }
+    } catch (err) {
+      console.error('Delete error:', err)
+      setError(err instanceof Error ? err.message : 'An error occurred while deleting the attendee')
+      setShowDeleteConfirm(false)
+      setShowDeleteResults(true)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+  
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false)
+  }
+  
+  const handleDeleteResultsClose = () => {
+    setShowDeleteResults(false)
   }
   
   // Handle input change
@@ -348,6 +420,16 @@ export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate }: A
   // View mode - render in description list format
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 m-6 mb-0">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-red-700 font-medium">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="border-b border-gray-200 p-6">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-4">
@@ -488,6 +570,80 @@ export const AttendeeDetail = ({ attendee, conferenceName, onBack, onUpdate }: A
           onEnrichmentComplete={handleEnrichmentComplete}
         />
       </div>
+      
+      {/* Delete Confirmation Dialog */}
+      <Transition.Root show={showDeleteConfirm} as={Fragment}>
+        <Dialog as="div" className="relative z-10" onClose={setShowDeleteConfirm}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black bg-opacity-75 transition-opacity" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+            <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                enterTo="opacity-100 translate-y-0 sm:scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 translate-y-0 sm:scale-100"
+                leaveTo="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+              >
+                <Dialog.Panel className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                  <div>
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+                      <XCircleIcon className="h-6 w-6 text-red-600" aria-hidden="true" />
+                    </div>
+                    <div className="mt-3 text-center sm:mt-5">
+                      <Dialog.Title as="h3" className="text-base font-semibold leading-6 text-gray-900">
+                        Remove Attendee
+                      </Dialog.Title>
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-500">
+                          Are you sure you want to delete {attendee.first_name} {attendee.last_name}? This action cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                    <button
+                      type="button"
+                      className="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 sm:col-start-2"
+                      onClick={handleDeleteConfirm}
+                      disabled={isDeleting}
+                    >
+                      {isDeleting ? 'Deleting...' : 'Delete'}
+                    </button>
+                    <button
+                      type="button"
+                      className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
+                      onClick={handleDeleteCancel}
+                      disabled={isDeleting}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition.Root>
+      
+      {/* Delete Results Dialog */}
+      <DeleteResultsDialog 
+        isOpen={showDeleteResults}
+        onClose={handleDeleteResultsClose}
+        results={deleteResults}
+      />
     </div>
   )
 } 
