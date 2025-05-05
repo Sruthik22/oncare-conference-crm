@@ -88,8 +88,22 @@ export function useDataFetching(): UseDataFetchingResult {
       `
       const attendeesData = await fetchAllRecords<Attendee>('attendees', attendeesQuery, 1000)
       
-      // Fetch all conferences
-      const conferencesData = await fetchAllRecords<Conference>('conferences', '*', 1000)
+      // Fetch all conferences with attendee info
+      const conferencesQuery = `
+        *,
+        attendee_conferences (
+          id,
+          attendee_id,
+          attendee:attendees (
+            id,
+            first_name,
+            last_name,
+            title,
+            company
+          )
+        )
+      `
+      const conferencesData = await fetchAllRecords<Conference>('conferences', conferencesQuery, 1000)
       
       // Fetch all health systems
       const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', '*', 1000)

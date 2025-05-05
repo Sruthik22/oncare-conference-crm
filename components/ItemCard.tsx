@@ -11,9 +11,19 @@ interface ItemCardProps {
   icon?: ReactNode
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   item?: any // The item being represented by this card
+  itemType?: 'attendee' | 'healthSystem' | 'conference' | 'default'
 }
 
-export function ItemCard({ title, subtitle, tags, children, onClick, icon, item }: ItemCardProps) {
+export function ItemCard({ 
+  title, 
+  subtitle, 
+  tags, 
+  children, 
+  onClick, 
+  icon, 
+  item, 
+  itemType = 'default' 
+}: ItemCardProps) {
   const { selectedItems, toggleSelection } = useSelection()
   const isSelected = item ? selectedItems.some(selectedItem => selectedItem.id === item.id) : false
 
@@ -30,6 +40,9 @@ export function ItemCard({ title, subtitle, tags, children, onClick, icon, item 
       toggleSelection(item)
     }
   }
+
+  // Only show subtitle for attendees or when itemType is default
+  const shouldShowSubtitle = subtitle && (itemType === 'attendee');
 
   return (
     <div 
@@ -57,7 +70,7 @@ export function ItemCard({ title, subtitle, tags, children, onClick, icon, item 
               {title}
             </h3>
           </div>
-          {subtitle && (
+          {shouldShowSubtitle && (
             <p className="text-sm text-gray-500 mt-1 truncate">
               {subtitle}
             </p>

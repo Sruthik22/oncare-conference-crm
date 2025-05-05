@@ -1,9 +1,14 @@
 import { useSelection } from '@/lib/context/SelectionContext'
-import { XMarkIcon, ArrowPathIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, TagIcon } from '@heroicons/react/24/outline'
-import { useState } from 'react'
+import { XMarkIcon, ArrowPathIcon, TrashIcon, ArrowUpTrayIcon, ArrowDownTrayIcon, TagIcon, SparklesIcon } from '@heroicons/react/24/outline'
+import { useState, useEffect } from 'react'
 import { apolloService, ApolloEnrichmentResponse, ApolloContactCreate } from '@/lib/apollo'
-import type { Attendee } from '@/types'
+import { definitiveService, DefinitiveEnrichmentResult } from '@/lib/definitive'
+import { AIEnrichmentResult, ensureColumnExists } from '@/lib/ai'
+import type { Attendee, HealthSystem, Conference } from '@/types'
 import { EnrichmentResultsDialog } from './EnrichmentResultsDialog'
+import { DefinitiveEnrichmentResultsDialog } from './DefinitiveEnrichmentResultsDialog'
+import { AIEnrichmentDialog } from './AIEnrichmentDialog'
+import { AIEnrichmentResultsDialog } from './AIEnrichmentResultsDialog'
 import ApolloListModal from './ApolloListModal'
 import { PushToApolloResultsDialog } from './PushToApolloResultsDialog'
 import { ListModal } from './ListModal'
@@ -12,7 +17,9 @@ import { supabase } from '@/lib/supabase'
 
 interface ActionBarProps {
   onEnrichmentComplete: (enrichedData: ApolloEnrichmentResponse) => void
-  onDelete?: (selectedAttendees: Attendee[]) => void
+  onDefinitiveEnrichmentComplete?: (enrichedData: any) => void
+  onAIEnrichmentComplete?: (enrichedData: any) => void
+  onDelete?: (selectedItems: Array<Attendee | HealthSystem | Conference>) => void
   conferenceName?: string
   activeListId?: string | null
   onListDelete?: (listId: string) => void
@@ -21,6 +28,8 @@ interface ActionBarProps {
 
 export function ActionBar({ 
   onEnrichmentComplete, 
+  onDefinitiveEnrichmentComplete,
+  onAIEnrichmentComplete,
   onDelete, 
   conferenceName = '',
   activeListId = null,
@@ -29,6 +38,8 @@ export function ActionBar({
 }: ActionBarProps) {
   const { selectedItems, deselectAll } = useSelection()
   const [isEnriching, setIsEnriching] = useState(false)
+  const [isDefinitiveEnriching, setIsDefinitiveEnriching] = useState(false)
+  const [isAIEnriching] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeletingList, setIsDeletingList] = useState(false)
   const [isPushing, setIsPushing] = useState(false)
@@ -36,6 +47,9 @@ export function ActionBar({
   const [isAddingToList, setIsAddingToList] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
+  const [isDefinitiveSuccessModalOpen, setIsDefinitiveSuccessModalOpen] = useState(false)
+  const [isAIEnrichmentModalOpen, setIsAIEnrichmentModalOpen] = useState(false)
+  const [isAISuccessModalOpen, setIsAISuccessModalOpen] = useState(false)
   const [isListModalOpen, setIsListModalOpen] = useState(false)
   const [isAddToListModalOpen, setIsAddToListModalOpen] = useState(false)
   const [isPushResultsModalOpen, setIsPushResultsModalOpen] = useState(false)
@@ -46,6 +60,9 @@ export function ActionBar({
     success: boolean
     error?: string
   }>>([])
+  const [definitiveEnrichmentResults, setDefinitiveEnrichmentResults] = useState<DefinitiveEnrichmentResult[]>([])
+  const [aiEnrichmentResults, setAIEnrichmentResults] = useState<AIEnrichmentResult[]>([])
+  const [aiEnrichmentColumnName, setAIEnrichmentColumnName] = useState('')
   const [pushResults, setPushResults] = useState<Array<{
     attendee: Attendee
     success: boolean
@@ -57,75 +74,182 @@ export function ActionBar({
     error?: string
   }>>([])
 
+  // Clear error message when selection changes
+  useEffect(() => {
+    setError(null);
+  }, [selectedItems]);
+
+  // Helper functions to determine the type of selected items
+  const getSelectedAttendees = () => selectedItems.filter((item): item is Attendee => 
+    'first_name' in item && 'last_name' in item
+  )
+  
+  const getSelectedHealthSystems = () => selectedItems.filter((item): item is HealthSystem => 
+    'name' in item && !('first_name' in item) && !('start_date' in item)
+  )
+  
+  const getSelectedConferences = () => selectedItems.filter((item): item is Conference => 
+    'name' in item && 'start_date' in item
+  )
+  
+  // Check if we have specific types of items selected
+  const hasAttendees = getSelectedAttendees().length > 0
+  const hasHealthSystems = getSelectedHealthSystems().length > 0
+  const hasConferences = getSelectedConferences().length > 0
+  
+  // Check if we have mixed selections (which we'll disallow for most operations)
+  const hasMixedSelection = (hasAttendees ? 1 : 0) + (hasHealthSystems ? 1 : 0) + (hasConferences ? 1 : 0) > 1
+
   const handleExportCSV = () => {
     try {
       setIsExporting(true)
       setError(null)
 
-      // Filter to only include attendees
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
-      
-      if (selectedAttendees.length === 0) {
-        setError('Please select at least one attendee')
+      if (hasMixedSelection) {
+        setError('Please select only one type of item (attendees, health systems, or conferences)')
         return
       }
-
-      // Define CSV header
-      const csvHeader = [
-        'First Name', 
-        'Last Name', 
-        'Email', 
-        'Phone', 
-        'Title', 
-        'Company', 
-        'LinkedIn URL'
-      ].join(',')
       
-      // Convert attendees to CSV rows
-      const csvRows = selectedAttendees.map(attendee => {
-        // Ensure values are escaped properly for CSV
-        const escapeCSV = (value: string | undefined) => {
-          if (!value) return ''
-          // Escape quotes and wrap in quotes if contains comma, quote or newline
-          const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
-          const escaped = value.replace(/"/g, '""')
-          return needsQuotes ? `"${escaped}"` : escaped
-        }
+      if (hasAttendees) {
+        const selectedAttendees = getSelectedAttendees()
         
-        return [
-          escapeCSV(attendee.first_name),
-          escapeCSV(attendee.last_name),
-          escapeCSV(attendee.email),
-          escapeCSV(attendee.phone),
-          escapeCSV(attendee.title),
-          escapeCSV(attendee.health_systems?.name || attendee.company),
-          escapeCSV(attendee.linkedin_url)
+        // Define CSV header for attendees
+        const csvHeader = [
+          'First Name', 
+          'Last Name', 
+          'Email', 
+          'Phone', 
+          'Title', 
+          'Company', 
+          'LinkedIn URL'
         ].join(',')
-      })
-      
-      // Combine header and rows
-      const csvContent = [csvHeader, ...csvRows].join('\n')
-      
-      // Create a blob and download link
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.setAttribute('href', url)
-      link.setAttribute('download', `${conferenceName || 'attendees'}_export_${new Date().toISOString().split('T')[0]}.csv`)
-      link.style.visibility = 'hidden'
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
+        
+        // Convert attendees to CSV rows
+        const csvRows = selectedAttendees.map(attendee => {
+          // Ensure values are escaped properly for CSV
+          const escapeCSV = (value: string | undefined) => {
+            if (!value) return ''
+            // Escape quotes and wrap in quotes if contains comma, quote or newline
+            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
+            const escaped = value.replace(/"/g, '""')
+            return needsQuotes ? `"${escaped}"` : escaped
+          }
+          
+          return [
+            escapeCSV(attendee.first_name),
+            escapeCSV(attendee.last_name),
+            escapeCSV(attendee.email),
+            escapeCSV(attendee.phone),
+            escapeCSV(attendee.title),
+            escapeCSV(attendee.health_systems?.name || attendee.company),
+            escapeCSV(attendee.linkedin_url)
+          ].join(',')
+        })
+        
+        // Combine header and rows
+        const csvContent = [csvHeader, ...csvRows].join('\n')
+        
+        // Create and trigger download
+        downloadCSV(csvContent, `${conferenceName || 'attendees'}_export`)
+      } else if (hasHealthSystems) {
+        const selectedHealthSystems = getSelectedHealthSystems()
+        
+        // Define CSV header for health systems
+        const csvHeader = [
+          'Name',
+          'Website',
+          'Address',
+          'City',
+          'State',
+          'Zip',
+          'Definitive ID'
+        ].join(',')
+        
+        // Convert health systems to CSV rows
+        const csvRows = selectedHealthSystems.map(system => {
+          // Ensure values are escaped properly for CSV
+          const escapeCSV = (value: string | undefined) => {
+            if (!value) return ''
+            // Escape quotes and wrap in quotes if contains comma, quote or newline
+            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
+            const escaped = value.replace(/"/g, '""')
+            return needsQuotes ? `"${escaped}"` : escaped
+          }
+          
+          return [
+            escapeCSV(system.name),
+            escapeCSV(system.website),
+            escapeCSV(system.address),
+            escapeCSV(system.city),
+            escapeCSV(system.state),
+            escapeCSV(system.zip),
+            escapeCSV(system.definitive_id)
+          ].join(',')
+        })
+        
+        // Combine header and rows
+        const csvContent = [csvHeader, ...csvRows].join('\n')
+        
+        // Create and trigger download
+        downloadCSV(csvContent, `health_systems_export`)
+      } else if (hasConferences) {
+        const selectedConferences = getSelectedConferences()
+        
+        // Define CSV header for conferences
+        const csvHeader = [
+          'Name',
+          'Start Date',
+          'End Date',
+          'Location'
+        ].join(',')
+        
+        // Convert conferences to CSV rows
+        const csvRows = selectedConferences.map(conference => {
+          // Ensure values are escaped properly for CSV
+          const escapeCSV = (value: string | undefined) => {
+            if (!value) return ''
+            // Escape quotes and wrap in quotes if contains comma, quote or newline
+            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
+            const escaped = value.replace(/"/g, '""')
+            return needsQuotes ? `"${escaped}"` : escaped
+          }
+          
+          return [
+            escapeCSV(conference.name),
+            escapeCSV(conference.start_date),
+            escapeCSV(conference.end_date),
+            escapeCSV(conference.location)
+          ].join(',')
+        })
+        
+        // Combine header and rows
+        const csvContent = [csvHeader, ...csvRows].join('\n')
+        
+        // Create and trigger download
+        downloadCSV(csvContent, `conferences_export`)
+      } else {
+        setError('Please select at least one item to export')
+      }
     } catch (err) {
       console.error('Export error:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to export contacts'
+      const errorMessage = err instanceof Error ? err.message : 'Failed to export data'
       setError(errorMessage)
     } finally {
       setIsExporting(false)
     }
+  }
+
+  // Helper function to download CSV
+  const downloadCSV = (csvContent: string, fileNamePrefix: string) => {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', `${fileNamePrefix}_${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const handleBulkEnrich = async () => {
@@ -133,10 +257,12 @@ export function ActionBar({
       setIsEnriching(true)
       setError(null)
 
-      // Filter to only include attendees
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
+      if (!hasAttendees || hasMixedSelection) {
+        setError('Please select only attendees for enrichment')
+        return
+      }
+
+      const selectedAttendees = getSelectedAttendees()
       
       if (selectedAttendees.length === 0) {
         setError('Please select at least one attendee')
@@ -187,31 +313,249 @@ export function ActionBar({
     }
   }
 
+  const handleBulkDefinitiveEnrich = async () => {
+    try {
+      setIsDefinitiveEnriching(true)
+      setError(null)
+
+      if (!hasHealthSystems || hasMixedSelection) {
+        setError('Please select only health systems for Definitive enrichment')
+        return
+      }
+
+      const selectedHealthSystems = getSelectedHealthSystems()
+      
+      if (selectedHealthSystems.length === 0) {
+        setError('Please select at least one health system')
+        return
+      }
+
+      // Call Definitive service to enrich health systems
+      const enrichedData = await definitiveService.enrichHealthSystems(selectedHealthSystems)
+      
+      // Store the results
+      setDefinitiveEnrichmentResults(enrichedData)
+      setIsDefinitiveSuccessModalOpen(true)
+      
+      // Clear selection after successful enrichment
+      deselectAll()
+      
+      // Update health systems in the database with the enriched data
+      const successfullyEnriched = enrichedData.filter(result => result.success)
+      
+      if (successfullyEnriched.length > 0 && onDefinitiveEnrichmentComplete) {
+        try {
+          // For each successfully enriched health system, update it in the database
+          for (const result of successfullyEnriched) {
+            const { healthSystem } = result
+            
+            // Update the health system in Supabase
+            await supabase
+              .from('health_systems')
+              .update({
+                definitive_id: healthSystem.definitive_id,
+                website: healthSystem.website,
+                address: healthSystem.address,
+                city: healthSystem.city,
+                state: healthSystem.state,
+                zip: healthSystem.zip
+              })
+              .eq('id', healthSystem.id)
+          }
+          
+          // Call the completion handler
+          if (onDefinitiveEnrichmentComplete) {
+            onDefinitiveEnrichmentComplete(enrichedData)
+          }
+        } catch (updateError) {
+          console.error('Error updating health systems:', updateError)
+        }
+      }
+    } catch (err) {
+      console.error('Definitive enrichment error:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to enrich health systems'
+      setError(errorMessage)
+    } finally {
+      setIsDefinitiveEnriching(false)
+    }
+  }
+
+  const handleBulkAIEnrich = () => {
+    try {
+      setError(null)
+
+      if (selectedItems.length === 0) {
+        setError('Please select at least one item')
+        return
+      }
+
+      // Open the AI enrichment dialog
+      setIsAIEnrichmentModalOpen(true)
+    } catch (err) {
+      console.error('AI enrichment preparation error:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to prepare items for AI enrichment'
+      setError(errorMessage)
+    }
+  }
+
+  const handleAIEnrichmentComplete = async (results: AIEnrichmentResult[], columnName: string) => {
+    try {
+      setAIEnrichmentResults(results)
+      setAIEnrichmentColumnName(columnName)
+      setIsAISuccessModalOpen(true)
+      
+      // Clear selection after successful enrichment
+      deselectAll()
+      
+      // Update items in the database with the enriched data
+      const successfullyEnriched = results.filter(result => result.success)
+      
+      if (successfullyEnriched.length > 0) {
+        try {
+          // Group by item type
+          const attendeeItems = successfullyEnriched.filter(result => 'first_name' in result.item && 'last_name' in result.item)
+          const healthSystemItems = successfullyEnriched.filter(result => 'name' in result.item && !('first_name' in result.item) && !('start_date' in result.item))
+          const conferenceItems = successfullyEnriched.filter(result => 'name' in result.item && 'start_date' in result.item)
+          
+          // Determine column type based on the first successful result
+          let columnType = 'text'
+          if (successfullyEnriched.length > 0) {
+            const firstValue = successfullyEnriched[0].enrichedData[columnName]
+            if (typeof firstValue === 'boolean') {
+              columnType = 'boolean'
+            } else if (typeof firstValue === 'number') {
+              columnType = 'number'
+            }
+          }
+          
+          // Log diagnostics
+          console.log('AI Enrichment results:', {
+            total: results.length,
+            successful: successfullyEnriched.length,
+            attendees: attendeeItems.length,
+            healthSystems: healthSystemItems.length,
+            conferences: conferenceItems.length,
+            columnName,
+            columnType
+          });
+          
+          // Process attendees
+          if (attendeeItems.length > 0) {
+            // First ensure the column exists in the attendees table
+            const columnCreated = await ensureColumnExists('attendees', columnName, columnType)
+            console.log(`Column creation for attendees ${columnCreated ? 'succeeded' : 'failed'}`);
+            
+            if (columnCreated) {
+              // Now update each attendee
+              for (const result of attendeeItems) {
+                const { item, enrichedData } = result
+                
+                try {
+                  // Update the attendee in Supabase
+                  const { error } = await supabase
+                    .from('attendees')
+                    .update({ [columnName]: enrichedData[columnName] })
+                    .eq('id', item.id)
+                  
+                  if (error) {
+                    console.error(`Error updating attendee ${item.id}:`, error);
+                  }
+                } catch (updateErr) {
+                  console.error(`Error updating attendee ${item.id}:`, updateErr);
+                }
+              }
+            }
+          }
+          
+          // Process health systems
+          if (healthSystemItems.length > 0) {
+            // First ensure the column exists in the health_systems table
+            const columnCreated = await ensureColumnExists('health_systems', columnName, columnType)
+            console.log(`Column creation for health_systems ${columnCreated ? 'succeeded' : 'failed'}`);
+            
+            if (columnCreated) {
+              // Now update each health system
+              for (const result of healthSystemItems) {
+                const { item, enrichedData } = result
+                
+                try {
+                  // Update the health system in Supabase
+                  const { error } = await supabase
+                    .from('health_systems')
+                    .update({ [columnName]: enrichedData[columnName] })
+                    .eq('id', item.id)
+                  
+                  if (error) {
+                    console.error(`Error updating health system ${item.id}:`, error);
+                  }
+                } catch (updateErr) {
+                  console.error(`Error updating health system ${item.id}:`, updateErr);
+                }
+              }
+            }
+          }
+          
+          // Process conferences
+          if (conferenceItems.length > 0) {
+            // First ensure the column exists in the conferences table
+            const columnCreated = await ensureColumnExists('conferences', columnName, columnType)
+            console.log(`Column creation for conferences ${columnCreated ? 'succeeded' : 'failed'}`);
+            
+            if (columnCreated) {
+              // Now update each conference
+              for (const result of conferenceItems) {
+                const { item, enrichedData } = result
+                
+                try {
+                  // Update the conference in Supabase
+                  const { error } = await supabase
+                    .from('conferences')
+                    .update({ [columnName]: enrichedData[columnName] })
+                    .eq('id', item.id)
+                  
+                  if (error) {
+                    console.error(`Error updating conference ${item.id}:`, error);
+                  }
+                } catch (updateErr) {
+                  console.error(`Error updating conference ${item.id}:`, updateErr);
+                }
+              }
+            }
+          }
+          
+          // Call the completion handler if provided
+          if (onAIEnrichmentComplete) {
+            onAIEnrichmentComplete(results)
+          }
+        } catch (updateError) {
+          console.error('Error updating items with AI enrichment:', updateError)
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleAIEnrichmentComplete:', error);
+    }
+  }
+
   const handleBulkDelete = () => {
     try {
       setIsDeleting(true)
       setError(null)
 
-      // Filter to only include attendees
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
-      
-      if (selectedAttendees.length === 0) {
-        setError('Please select at least one attendee')
+      if (selectedItems.length === 0) {
+        setError('Please select at least one item')
         return
       }
 
       // Call the onDelete handler passed from parent
       if (onDelete) {
-        onDelete(selectedAttendees)
+        onDelete(selectedItems)
       }
       
       // Clear selection after initiating deletion
       deselectAll()
     } catch (err) {
       console.error('Delete preparation error:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to prepare contacts for deletion'
+      const errorMessage = err instanceof Error ? err.message : 'Failed to prepare items for deletion'
       setError(errorMessage)
     } finally {
       setIsDeleting(false)
@@ -221,10 +565,12 @@ export function ActionBar({
   const handleBulkPushToApollo = () => {
     setError(null)
     
-    // Filter to only include attendees
-    const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-      'first_name' in item && 'last_name' in item
-    )
+    if (!hasAttendees || hasMixedSelection) {
+      setError('Please select only attendees to push to Apollo')
+      return
+    }
+    
+    const selectedAttendees = getSelectedAttendees()
     
     if (selectedAttendees.length === 0) {
       setError('Please select at least one attendee')
@@ -237,10 +583,12 @@ export function ActionBar({
   const handleBulkAddToList = () => {
     setError(null)
     
-    // Filter to only include attendees
-    const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-      'first_name' in item && 'last_name' in item
-    )
+    if (!hasAttendees || hasMixedSelection) {
+      setError('Please select only attendees to add to a list')
+      return
+    }
+    
+    const selectedAttendees = getSelectedAttendees()
     
     if (selectedAttendees.length === 0) {
       setError('Please select at least one attendee')
@@ -256,10 +604,11 @@ export function ActionBar({
     setSelectedListName(listName)
     
     try {
-      // Filter to only include attendees
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
+      if (!hasAttendees || hasMixedSelection) {
+        throw new Error('Please select only attendees to push to Apollo')
+      }
+      
+      const selectedAttendees = getSelectedAttendees()
       
       if (selectedAttendees.length === 0) {
         throw new Error('No attendees selected')
@@ -295,9 +644,7 @@ export function ActionBar({
       console.error('Error pushing to Apollo:', err)
       
       // If we have attendees but the push failed, mark all as failed
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
+      const selectedAttendees = getSelectedAttendees()
       
       if (selectedAttendees.length > 0) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to push contacts to Apollo'
@@ -323,10 +670,11 @@ export function ActionBar({
     setSelectedListName(listName)
     
     try {
-      // Filter to only include attendees
-      const selectedAttendees = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      )
+      if (!hasAttendees || hasMixedSelection) {
+        throw new Error('Please select only attendees to add to a list')
+      }
+      
+      const selectedAttendees = getSelectedAttendees()
       
       if (selectedAttendees.length === 0) {
         throw new Error('No attendees selected')
@@ -458,6 +806,11 @@ export function ActionBar({
           onClose={() => setIsSuccessModalOpen(false)}
           results={enrichmentResults}
         />
+        <DefinitiveEnrichmentResultsDialog
+          isOpen={isDefinitiveSuccessModalOpen}
+          onClose={() => setIsDefinitiveSuccessModalOpen(false)}
+          results={definitiveEnrichmentResults}
+        />
         <PushToApolloResultsDialog
           isOpen={isPushResultsModalOpen}
           onClose={() => setIsPushResultsModalOpen(false)}
@@ -497,22 +850,56 @@ export function ActionBar({
           <div className="flex items-center gap-2">
             {selectedItems.length > 0 && (
               <>
+                {/* Show enrich button only for attendees */}
+                {hasAttendees && !hasMixedSelection && (
+                  <button 
+                    onClick={handleBulkEnrich}
+                    disabled={isEnriching}
+                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none"
+                  >
+                    {isEnriching ? (
+                      <span className="animate-spin mr-2">⌛</span>
+                    ) : (
+                      <ArrowPathIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Enrich with Apollo
+                  </button>
+                )}
+
+                {/* Show Definitive Healthcare enrich button only for health systems */}
+                {hasHealthSystems && !hasMixedSelection && (
+                  <button 
+                    onClick={handleBulkDefinitiveEnrich}
+                    disabled={isDefinitiveEnriching}
+                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none"
+                  >
+                    {isDefinitiveEnriching ? (
+                      <span className="animate-spin mr-2">⌛</span>
+                    ) : (
+                      <ArrowPathIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Enrich with Definitive
+                  </button>
+                )}
+
+                {/* AI Enrichment button for all item types */}
                 <button 
-                  onClick={handleBulkEnrich}
-                  disabled={isEnriching || selectedItems.length === 0}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none"
+                  onClick={handleBulkAIEnrich}
+                  disabled={isAIEnriching}
+                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none"
                 >
-                  {isEnriching ? (
+                  {isAIEnriching ? (
                     <span className="animate-spin mr-2">⌛</span>
                   ) : (
-                    <ArrowPathIcon className="h-4 w-4 mr-2" />
+                    <SparklesIcon className="h-4 w-4 mr-2" />
                   )}
-                  Enrich
+                  Enrich with AI
                 </button>
 
+                {/* Export available for all types */}
                 <button 
                   onClick={handleExportCSV}
-                  disabled={isExporting || selectedItems.length === 0}
+                  disabled={isExporting}
                   className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-green-700 bg-green-100 hover:bg-green-200 focus:outline-none"
                 >
                   {isExporting ? (
@@ -523,35 +910,42 @@ export function ActionBar({
                   Export to File
                 </button>
 
-                <button 
-                  onClick={handleBulkPushToApollo}
-                  disabled={isPushing || selectedItems.length === 0}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none"
-                >
-                  {isPushing ? (
-                    <span className="animate-spin mr-2">⌛</span>
-                  ) : (
-                    <ArrowUpTrayIcon className="h-4 w-4 mr-2" />
-                  )}
-                  Push to Apollo
-                </button>
+                {/* Push to Apollo only for attendees */}
+                {hasAttendees && !hasMixedSelection && (
+                  <button 
+                    onClick={handleBulkPushToApollo}
+                    disabled={isPushing}
+                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-purple-700 bg-purple-100 hover:bg-purple-200 focus:outline-none"
+                  >
+                    {isPushing ? (
+                      <span className="animate-spin mr-2">⌛</span>
+                    ) : (
+                      <ArrowUpTrayIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Push to Apollo
+                  </button>
+                )}
 
-                <button 
-                  onClick={handleBulkAddToList}
-                  disabled={isAddingToList || selectedItems.length === 0}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-yellow-700 bg-yellow-100 hover:bg-yellow-200 focus:outline-none"
-                >
-                  {isAddingToList ? (
-                    <span className="animate-spin mr-2">⌛</span>
-                  ) : (
-                    <TagIcon className="h-4 w-4 mr-2" />
-                  )}
-                  Add to List
-                </button>
+                {/* Add to List only for attendees */}
+                {hasAttendees && !hasMixedSelection && (
+                  <button 
+                    onClick={handleBulkAddToList}
+                    disabled={isAddingToList}
+                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-yellow-700 bg-yellow-100 hover:bg-yellow-200 focus:outline-none"
+                  >
+                    {isAddingToList ? (
+                      <span className="animate-spin mr-2">⌛</span>
+                    ) : (
+                      <TagIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Add to List
+                  </button>
+                )}
 
+                {/* Delete available for all types */}
                 <button 
                   onClick={handleBulkDelete}
-                  disabled={isDeleting || selectedItems.length === 0}
+                  disabled={isDeleting}
                   className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none"
                 >
                   {isDeleting ? (
@@ -594,6 +988,12 @@ export function ActionBar({
         results={enrichmentResults}
       />
       
+      <DefinitiveEnrichmentResultsDialog
+        isOpen={isDefinitiveSuccessModalOpen}
+        onClose={() => setIsDefinitiveSuccessModalOpen(false)}
+        results={definitiveEnrichmentResults}
+      />
+      
       <ApolloListModal
         isOpen={isListModalOpen}
         onClose={() => setIsListModalOpen(false)}
@@ -621,6 +1021,20 @@ export function ActionBar({
         onClose={() => setIsAddToListResultsModalOpen(false)}
         results={addToListResults}
         listName={selectedListName}
+      />
+
+      <AIEnrichmentDialog
+        isOpen={isAIEnrichmentModalOpen}
+        onClose={() => setIsAIEnrichmentModalOpen(false)}
+        items={selectedItems}
+        onEnrichmentComplete={(results, columnName) => handleAIEnrichmentComplete(results, columnName)}
+      />
+      
+      <AIEnrichmentResultsDialog
+        isOpen={isAISuccessModalOpen}
+        onClose={() => setIsAISuccessModalOpen(false)}
+        results={aiEnrichmentResults}
+        columnName={aiEnrichmentColumnName}
       />
     </>
   )

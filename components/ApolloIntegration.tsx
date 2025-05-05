@@ -37,7 +37,8 @@ export default function ApolloIntegration({
       const enriched = await apolloService.enrichContacts(searchParams);
 
       if (!enriched || !enriched.matches || enriched.matches.length === 0) {
-        throw new Error('No enriched data received or no matches found');
+        setError('No matches found in Apollo for the provided contact information');
+        return;
       }
 
       setEnrichedData([enriched]);

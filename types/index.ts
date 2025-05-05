@@ -29,6 +29,7 @@ export interface Conference {
   end_date?: string
   location?: string
   created_at: string
+  attendee_conferences?: AttendeeConference[]
 }
 
 export interface AttendeeConference {
@@ -37,6 +38,7 @@ export interface AttendeeConference {
   conference_id: string
   created_at: string
   conferences?: Conference
+  attendee?: Attendee
 }
 
 export interface Attendee {

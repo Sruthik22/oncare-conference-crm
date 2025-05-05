@@ -5,9 +5,9 @@ import { DataTable } from '@/components/DataTable'
 import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
 import { ItemCard } from '@/components/ItemCard'
-import { AttendeeDetail } from '@/components/AttendeeDetail'
-import { ConferenceDetail } from '@/components/ConferenceDetail'
-import { HealthSystemDetail } from '@/components/HealthSystemDetail'
+import { AttendeeDetailAdapter } from '@/components/AttendeeDetailAdapter'
+import { ConferenceDetailAdapter } from '@/components/ConferenceDetailAdapter'
+import { HealthSystemDetailAdapter } from '@/components/HealthSystemDetailAdapter'
 import { ViewSettingsMenu } from '@/components/ViewSettingsMenu'
 import { ViewToggle } from '@/components/ViewToggle'
 import { TabNavigation } from '@/components/TabNavigation'
@@ -107,7 +107,56 @@ export default function Home() {
     setConferences 
   } = useDataFetching()
 
-  // Memoize column definitions
+  // Detect custom columns from data
+  const detectCustomColumns = <T extends Record<string, any>>(data: T[]) => {
+    if (!data || data.length === 0) return [] as ColumnDef<T>[]
+    
+    const customColumns: ColumnDef<T>[] = []
+    const firstItem = data[0]
+    
+    // Get all object keys
+    Object.keys(firstItem).forEach(key => {
+      // Skip standard columns and internal fields
+      const standardKeys = ['id', 'first_name', 'last_name', 'email', 'phone', 'title', 'company', 
+        'name', 'city', 'state', 'website', 'location', 'start_date', 'end_date', 
+        'created_at', 'updated_at', 'definitive_id', 'address', 'zip', 'revenue',
+        'linkedin_url', 'health_systems', 'health_system_id']
+      
+      if (!standardKeys.includes(key) && !key.startsWith('_')) {
+        // This appears to be a custom column
+        customColumns.push({
+          id: key,
+          header: key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+          accessorKey: key as keyof T,
+          cell: (info) => {
+            const value = info.getValue()
+            // Format boolean values as Yes/No
+            if (typeof value === 'boolean') {
+              return value ? 'Yes' : 'No'
+            }
+            return value
+          }
+        })
+      }
+    })
+    
+    return customColumns
+  }
+
+  // Enhance column definitions with custom columns
+  const attendeesCustomColumns = useMemo(() => {
+    return detectCustomColumns<Attendee>(attendees)
+  }, [attendees])
+  
+  const healthSystemsCustomColumns = useMemo(() => {
+    return detectCustomColumns<HealthSystem>(healthSystems)
+  }, [healthSystems])
+  
+  const conferencesCustomColumns = useMemo(() => {
+    return detectCustomColumns<Conference>(conferences)
+  }, [conferences])
+
+  // Update the column definitions to include custom columns
   const attendeeColumns = useMemo<ColumnDef<Attendee>[]>(() => [
     {
       id: 'name',
@@ -118,13 +167,15 @@ export default function Home() {
     { id: 'phone', header: 'Phone', accessorKey: 'phone' },
     { id: 'title', header: 'Title', accessorKey: 'title' },
     { id: 'company', header: 'Company', accessorKey: 'company' },
-  ], [])
+    ...attendeesCustomColumns
+  ], [attendeesCustomColumns])
 
   const healthSystemColumns = useMemo<ColumnDef<HealthSystem>[]>(() => [
     { id: 'name', header: 'Name', accessorKey: 'name' },
     { id: 'location', header: 'Location', accessorFn: (row) => `${row.city || ''}, ${row.state || ''}` },
     { id: 'website', header: 'Website', accessorKey: 'website' },
-  ], [])
+    ...healthSystemsCustomColumns
+  ], [healthSystemsCustomColumns])
 
   const conferenceColumns = useMemo<ColumnDef<Conference>[]>(() => [
     { id: 'name', header: 'Name', accessorKey: 'name' },
@@ -139,7 +190,8 @@ export default function Home() {
       }
     },
     { id: 'location', header: 'Location', accessorKey: 'location' },
-  ], [])
+    ...conferencesCustomColumns
+  ], [conferencesCustomColumns])
 
   // Get all available columns for current tab
   const getAllColumns = useMemo(() => {
@@ -261,34 +313,155 @@ export default function Home() {
   }
 
   const handleConferenceUpdate = async (updatedConference: Conference) => {
+    console.log('Updating conference with data:', updatedConference);
+    
+    // Only update base fields, not relationships
+    const conferenceUpdate = {
+      id: updatedConference.id,
+      name: updatedConference.name,
+      start_date: updatedConference.start_date,
+      end_date: updatedConference.end_date,
+      location: updatedConference.location
+    };
+
+    // For database updates we only send the base fields
     const { error } = await supabase
       .from('conferences')
-      .update(updatedConference)
-      .eq('id', updatedConference.id)
+      .update(conferenceUpdate)
+      .eq('id', updatedConference.id);
 
     if (error) {
-      console.error('Error updating conference:', error)
-      return
+      console.error('Error updating conference:', error);
+      return;
     }
 
-    setConferences(prev => prev.map(c => c.id === updatedConference.id ? updatedConference : c))
-    setSelectedItem(updatedConference)
+    // For UI updates, we want to preserve all relationships
+    setConferences(prev => prev.map(c => {
+      if (c.id === updatedConference.id) {
+        // Keep all original fields from the state
+        const mergedConference = {
+          ...c, // Start with existing data to preserve relationships
+          ...updatedConference, // Override with updated fields
+        };
+        console.log('Merged conference data for UI update:', mergedConference);
+        return mergedConference;
+      }
+      return c;
+    }));
+    
+    // Also update the selected item to show changes immediately
+    setSelectedItem(prev => {
+      if (prev && prev.id === updatedConference.id) {
+        return {
+          ...prev, // Keep existing relationships
+          ...updatedConference, // Override with updated fields
+        };
+      }
+      return updatedConference;
+    });
   }
 
   const handleHealthSystemUpdate = async (updatedHealthSystem: HealthSystem) => {
+    console.log('Updating health system with data:', updatedHealthSystem);
+    
+    // Only update base fields, not relationships
+    const healthSystemUpdate = {
+      id: updatedHealthSystem.id,
+      name: updatedHealthSystem.name,
+      definitive_id: updatedHealthSystem.definitive_id,
+      website: updatedHealthSystem.website,
+      address: updatedHealthSystem.address,
+      city: updatedHealthSystem.city,
+      state: updatedHealthSystem.state,
+      zip: updatedHealthSystem.zip
+    };
+
+    // For database updates we only send the base fields
     const { error } = await supabase
       .from('health_systems')
-      .update(updatedHealthSystem)
-      .eq('id', updatedHealthSystem.id)
+      .update(healthSystemUpdate)
+      .eq('id', updatedHealthSystem.id);
 
     if (error) {
-      console.error('Error updating health system:', error)
-      return
+      console.error('Error updating health system:', error);
+      return;
     }
-
-    setHealthSystems(prev => prev.map(h => h.id === updatedHealthSystem.id ? updatedHealthSystem : h))
-    setSelectedItem(updatedHealthSystem)
+    
+    // For UI updates, we want to preserve all relationships
+    setHealthSystems(prev => prev.map(h => {
+      if (h.id === updatedHealthSystem.id) {
+        // Keep all original fields from the state
+        const mergedHealthSystem = {
+          ...h, // Start with existing data to preserve relationships
+          ...updatedHealthSystem, // Override with updated fields
+        };
+        console.log('Merged health system data for UI update:', mergedHealthSystem);
+        return mergedHealthSystem;
+      }
+      return h;
+    }));
+    
+    // Also update the selected item to show changes immediately 
+    setSelectedItem(prev => {
+      if (prev && prev.id === updatedHealthSystem.id) {
+        return {
+          ...prev, // Keep existing relationships
+          ...updatedHealthSystem, // Override with updated fields
+        };
+      }
+      return updatedHealthSystem;
+    });
   }
+
+  const handleHealthSystemDelete = async (healthSystemId: string) => {
+    try {
+      const { error } = await supabase
+        .from('health_systems')
+        .delete()
+        .eq('id', healthSystemId)
+      
+      if (error) {
+        console.error('Error deleting health system:', error)
+        return
+      }
+      
+      // Update the health systems list by removing the deleted health system
+      setHealthSystems(prevHealthSystems => 
+        prevHealthSystems.filter(h => h.id !== healthSystemId)
+      )
+      
+      // Clear the selected item
+      setSelectedItem(null)
+    } catch (err) {
+      console.error('Unexpected error deleting health system:', err)
+    }
+  }
+
+  const handleConferenceDelete = async (conferenceId: string) => {
+    try {
+      const { error } = await supabase
+        .from('conferences')
+        .delete()
+        .eq('id', conferenceId);
+      
+      if (error) {
+        console.error('Error deleting conference:', error);
+        return;
+      }
+      
+      // Update the conferences list by removing the deleted conference
+      setConferences(prevConferences => 
+        prevConferences.filter(c => c.id !== conferenceId)
+      );
+      
+      // Clear the selected item if it was the deleted conference
+      if (selectedItem && 'start_date' in selectedItem && selectedItem.id === conferenceId) {
+        setSelectedItem(null);
+      }
+    } catch (err) {
+      console.error('Unexpected error deleting conference:', err);
+    }
+  };
 
   const handleEnrichmentCompleteWrapper = async (enrichedData: ApolloEnrichmentResponse) => {
     try {
@@ -298,59 +471,68 @@ export default function Home() {
     }
   };
 
-  // Add a function to handle bulk deletion of attendees
-  const handleBulkDelete = async (attendeesToDelete: Attendee[]) => {
-    if (!attendeesToDelete || attendeesToDelete.length === 0) return
-    
-    const results: Array<{
-      attendee: Attendee
-      success: boolean
-      error?: string
-    }> = []
-    
-    // Process each attendee sequentially
-    for (const attendee of attendeesToDelete) {
-      try {
-        const { error } = await supabase
-          .from('attendees')
-          .delete()
-          .eq('id', attendee.id)
-        
-        if (error) {
-          console.error(`Error deleting attendee ${attendee.id}:`, error)
-          results.push({
-            attendee,
-            success: false,
-            error: error.message
-          })
-        } else {
-          results.push({
-            attendee,
-            success: true
-          })
-        }
-      } catch (err) {
-        console.error(`Unexpected error deleting attendee ${attendee.id}:`, err)
-        results.push({
-          attendee,
-          success: false,
-          error: err instanceof Error ? err.message : 'An unexpected error occurred'
-        })
+  // Update handleBulkDelete to handle different entity types
+  const handleBulkDelete = async (selectedItems: Array<Attendee | HealthSystem | Conference>) => {
+    try {
+      // Separate items by type
+      const attendeesToDelete = selectedItems.filter((item): item is Attendee => 
+        'first_name' in item && 'last_name' in item
+      );
+      
+      const healthSystemsToDelete = selectedItems.filter((item): item is HealthSystem => 
+        'name' in item && !('first_name' in item) && !('start_date' in item)
+      );
+      
+      const conferencesToDelete = selectedItems.filter((item): item is Conference => 
+        'name' in item && 'start_date' in item
+      );
+      
+      // Handle each type appropriately
+      if (attendeesToDelete.length > 0) {
+        await handleAttendeesDelete(attendeesToDelete);
       }
+      
+      if (healthSystemsToDelete.length > 0) {
+        for (const healthSystem of healthSystemsToDelete) {
+          await handleHealthSystemDelete(healthSystem.id);
+        }
+      }
+      
+      if (conferencesToDelete.length > 0) {
+        for (const conference of conferencesToDelete) {
+          await handleConferenceDelete(conference.id);
+        }
+      }
+    } catch (error) {
+      console.error('Error in bulk delete:', error);
     }
-    
-    // Store results and show the dialog
-    setDeleteResults(results)
-    setShowDeleteResults(true)
-    
-    // Update the attendees list by removing successfully deleted attendees
-    const successfullyDeletedIds = results
-      .filter(result => result.success)
-      .map(result => result.attendee.id)
-    
-    setAttendees(prevAttendees => 
-      prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
-    )
+  };
+  
+  const handleHealthSystemClick = (healthSystemId: string) => {
+    // Find the health system and set it as the selected item
+    const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
+    if (healthSystem) {
+      setActiveTab('health-systems');
+      setSelectedItem(healthSystem);
+    }
+  }
+  
+  const handleConferenceClick = (conferenceId: string) => {
+    // Find the conference and set it as the selected item
+    const conference = conferences.find(conf => conf.id === conferenceId);
+    if (conference) {
+      setActiveTab('conferences');
+      setSelectedItem(conference);
+    }
+  }
+  
+  const handleAttendeeClick = (attendeeId: string) => {
+    // Find the attendee and set it as the selected item
+    const attendee = attendees.find(att => att.id === attendeeId);
+    if (attendee) {
+      setActiveTab('attendees');
+      setSelectedItem(attendee);
+    }
   }
   
   const renderSelectedItemDetail = () => {
@@ -359,10 +541,9 @@ export default function Home() {
     if ('first_name' in selectedItem) {
       const attendee = selectedItem as Attendee;
       const conferenceName = attendee.attendee_conferences?.[0]?.conferences?.name || 'Unknown Conference';
-      return <AttendeeDetail 
+      return <AttendeeDetailAdapter 
         attendee={attendee} 
         conferenceName={conferenceName}
-        onBack={() => setSelectedItem(null)}
         onUpdate={(updatedAttendee) => {
           // Update the selected item with the enriched data
           setSelectedItem(updatedAttendee);
@@ -379,11 +560,33 @@ export default function Home() {
             prevAttendees.filter(a => a.id !== deletedAttendeeId)
           );
         }}
+        onHealthSystemClick={handleHealthSystemClick}
+        onConferenceClick={handleConferenceClick}
       />
     } else if ('start_date' in selectedItem) {
-      return <ConferenceDetail conference={selectedItem} onUpdate={handleConferenceUpdate} />
+      return <ConferenceDetailAdapter 
+        conference={selectedItem} 
+        onUpdate={handleConferenceUpdate}
+        onDelete={handleConferenceDelete}
+        onAttendeeClick={handleAttendeeClick}
+      />
     } else {
-      return <HealthSystemDetail healthSystem={selectedItem} onUpdate={handleHealthSystemUpdate} />
+      // Find attendees linked to this health system
+      const linkedAttendees = attendees
+        .filter(att => att.health_system_id === selectedItem.id)
+        .map(att => ({
+          id: att.id,
+          first_name: att.first_name,
+          last_name: att.last_name
+        }));
+      
+      return <HealthSystemDetailAdapter 
+        healthSystem={selectedItem} 
+        onUpdate={handleHealthSystemUpdate}
+        onDelete={handleHealthSystemDelete}
+        onAttendeeClick={handleAttendeeClick}
+        linkedAttendees={linkedAttendees}
+      />
     }
   }
 
@@ -811,6 +1014,142 @@ export default function Home() {
     }
   };
 
+  // Handle AI enrichment completion
+  const handleAIEnrichmentComplete = async (enrichedData: any) => {
+    console.log('AI Enrichment completed:', enrichedData)
+    
+    // Determine which data type was enriched and refresh accordingly
+    const successfullyEnriched = enrichedData.filter((result: any) => result.success)
+    
+    if (successfullyEnriched.length > 0) {
+      // Check the type of the first item to determine which data to refresh
+      const firstItem = successfullyEnriched[0].item
+      
+      if ('first_name' in firstItem && 'last_name' in firstItem) {
+        // Refresh attendees
+        const { data } = await supabase
+          .from('attendees')
+          .select('*, health_systems(*)')
+        
+        if (data) {
+          setAttendees(data as Attendee[])
+        }
+      } else if ('name' in firstItem && !('start_date' in firstItem)) {
+        // Refresh health systems
+        const { data } = await supabase
+          .from('health_systems')
+          .select('*')
+        
+        if (data) {
+          setHealthSystems(data as HealthSystem[])
+        }
+      } else if ('start_date' in firstItem) {
+        // Refresh conferences
+        const { data } = await supabase
+          .from('conferences')
+          .select('*')
+        
+        if (data) {
+          setConferences(data as Conference[])
+        }
+      }
+    }
+  }
+
+  // Replace the handleDefinitiveEnrichmentComplete function with a corrected version
+  const handleDefinitiveEnrichmentComplete = async (enrichedData: any) => {
+    try {
+      // Since there's no fetchHealthSystems function, we'll use the existing setHealthSystems state function
+      // to update health systems that were enriched
+      const successfullyEnriched = enrichedData.filter((item: any) => item.success);
+     
+      if (successfullyEnriched.length > 0) {
+        // Update health systems in the local state
+        setHealthSystems(prevHealthSystems => 
+          prevHealthSystems.map(hs => {
+            // Find if this health system was enriched
+            const enrichedItem = successfullyEnriched.find((item: any) => 
+              item.healthSystem.id === hs.id
+            );
+            
+            // If it was enriched, update it with new data
+            if (enrichedItem) {
+              return {
+                ...hs,
+                definitive_id: enrichedItem.healthSystem.definitive_id,
+                website: enrichedItem.healthSystem.website || hs.website,
+                address: enrichedItem.healthSystem.address || hs.address,
+                city: enrichedItem.healthSystem.city || hs.city,
+                state: enrichedItem.healthSystem.state || hs.state,
+                zip: enrichedItem.healthSystem.zip || hs.zip
+              };
+            }
+            
+            // Otherwise return the original health system
+            return hs;
+          })
+        );
+      }
+    } catch (error) {
+      console.error('Error handling Definitive enrichment completion:', error);
+    }
+  };
+
+  // Add the missing handleAttendeesDelete function
+  const handleAttendeesDelete = async (attendeesToDelete: Attendee[]) => {
+    if (!attendeesToDelete || attendeesToDelete.length === 0) return;
+    
+    const results: Array<{
+      attendee: Attendee;
+      success: boolean;
+      error?: string;
+    }> = [];
+    
+    // Process each attendee sequentially
+    for (const attendee of attendeesToDelete) {
+      try {
+        const { error } = await supabase
+          .from('attendees')
+          .delete()
+          .eq('id', attendee.id);
+         
+        if (error) {
+          console.error(`Error deleting attendee ${attendee.id}:`, error);
+          results.push({
+            attendee,
+            success: false,
+            error: error.message
+          });
+        } else {
+          results.push({
+            attendee,
+            success: true
+          });
+        }
+      } catch (err) {
+        console.error(`Unexpected error deleting attendee ${attendee.id}:`, err);
+        results.push({
+          attendee,
+          success: false,
+          error: err instanceof Error ? err.message : 'An unexpected error occurred'
+        });
+      }
+    }
+    
+    // Store results and show the dialog
+    setDeleteResults(results);
+    setShowDeleteResults(true);
+    
+    // Update the attendees list by removing successfully deleted attendees
+    const successfullyDeletedIds = results
+      .filter(result => result.success)
+      .map(result => result.attendee.id);
+    
+    setAttendees(prevAttendees => 
+      prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
+    );
+  };
+
   // Render a loading spinner while auth state is being determined
   if (authLoading) {
     return (
@@ -846,7 +1185,11 @@ export default function Home() {
         <div className="flex flex-1 overflow-hidden">
           <TabNavigation 
             activeTab={activeTab} 
-            onTabChange={setActiveTab} 
+            onTabChange={(tab) => {
+              // Reset selectedItem when changing tabs
+              setSelectedItem(null);
+              setActiveTab(tab);
+            }} 
             counts={{
               attendees: attendees.length,
               'health-systems': healthSystems.length,
@@ -873,6 +1216,8 @@ export default function Home() {
         
         <ActionBar 
           onEnrichmentComplete={handleEnrichmentCompleteWrapper}
+          onDefinitiveEnrichmentComplete={handleDefinitiveEnrichmentComplete}
+          onAIEnrichmentComplete={handleAIEnrichmentComplete}
           onDelete={handleBulkDelete}
           conferenceName={
             activeListId && lists.find(list => list.id === activeListId)
