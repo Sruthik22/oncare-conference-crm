@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Icon } from './Icon'
 import { 
   FunnelIcon,
@@ -12,7 +12,15 @@ import {
   PhoneIcon,
   BriefcaseIcon,
   GlobeAltIcon,
+  DocumentTextIcon,
+  LinkIcon,
+  IdentificationIcon,
+  ClockIcon,
+  AcademicCapIcon,
+  CurrencyDollarIcon,
+  HashtagIcon,
 } from '@heroicons/react/24/outline'
+import { useDatabaseSchema } from '@/hooks/useDatabaseSchema'
 
 type FilterOperator = 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
 
@@ -24,23 +32,49 @@ interface Filter {
 }
 
 interface FilterMenuProps {
-  columns: Array<{
-    id: string
-    header: string
-  }>
+  activeTab: string
   onFilterChange: (filters: Filter[]) => void
   isOpen: boolean
   onToggle: () => void
 }
 
-export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: FilterMenuProps) {
+export function FilterMenu({ activeTab, onFilterChange, isOpen, onToggle }: FilterMenuProps) {
   const [filters, setFilters] = useState<Filter[]>([])
   const [activeFilter, setActiveFilter] = useState<Filter | null>(null)
+  const { columns, loading } = useDatabaseSchema()
+  
+  // Get columns for the active tab
+  const tabColumns = columns.filter(col => {
+    switch (activeTab) {
+      case 'attendees':
+        return col.table === 'attendees'
+      case 'health-systems':
+        return col.table === 'health_systems'
+      case 'conferences':
+        return col.table === 'conferences'
+      default:
+        return false
+    }
+  })
+
+  // Initialize first filter with first available column
+  useEffect(() => {
+    if (filters.length === 0 && tabColumns.length > 0) {
+      setFilters([{
+        id: Math.random().toString(36).substr(2, 9),
+        property: tabColumns[0]?.id || '',
+        operator: 'equals',
+        value: ''
+      }])
+    }
+  }, [filters.length, tabColumns])
 
   const addFilter = () => {
+    if (tabColumns.length === 0) return
+    
     const newFilter: Filter = {
       id: Math.random().toString(36).substr(2, 9),
-      property: columns[0]?.id || '',
+      property: tabColumns[0]?.id || '',
       operator: 'equals',
       value: ''
     }
@@ -63,11 +97,12 @@ export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: Filter
   }
 
   const getOperatorOptions = (property: string) => {
-    const column = columns.find(c => c.id === property)
+    const column = tabColumns.find(c => c.id === property)
     if (!column) return []
 
-    // Text-based operators
-    if (['name', 'email', 'title', 'company', 'location'].includes(property)) {
+    // Text-based operators for string fields
+    if (column.data_type === 'text' || column.data_type === 'character varying' || 
+        column.data_type === 'varchar' || column.data_type.includes('char')) {
       return [
         { value: 'equals', label: 'Equals' },
         { value: 'contains', label: 'Contains' },
@@ -79,11 +114,26 @@ export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: Filter
     }
 
     // Date-based operators
-    if (['date'].includes(property)) {
+    if (column.data_type === 'date' || column.data_type === 'timestamp' || 
+        column.data_type.includes('time')) {
       return [
         { value: 'equals', label: 'Equals' },
         { value: 'greater_than', label: 'After' },
         { value: 'less_than', label: 'Before' },
+        { value: 'is_empty', label: 'Is empty' },
+        { value: 'is_not_empty', label: 'Is not empty' },
+      ]
+    }
+
+    // Numeric operators
+    if (column.data_type === 'integer' || column.data_type === 'bigint' || 
+        column.data_type === 'decimal' || column.data_type === 'numeric' ||
+        column.data_type === 'real' || column.data_type === 'double precision' ||
+        column.data_type === 'uuid') {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'greater_than', label: 'Greater than' },
+        { value: 'less_than', label: 'Less than' },
         { value: 'is_empty', label: 'Is empty' },
         { value: 'is_not_empty', label: 'Is not empty' },
       ]
@@ -98,8 +148,14 @@ export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: Filter
   }
 
   const getColumnIcon = (columnId: string) => {
+    // Get column info
+    const column = tabColumns.find(c => c.id === columnId)
+    
+    // Based on column name
     switch (columnId) {
       case 'name':
+      case 'first_name':
+      case 'last_name':
         return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
       case 'email':
         return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
@@ -109,15 +165,65 @@ export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: Filter
         return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />
       case 'company':
         return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
-      case 'location':
-        return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
-      case 'website':
-        return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
-      case 'date':
-        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
-      default:
-        return <Icon icon={FunnelIcon} size="sm" className="text-gray-400" />
     }
+    
+    // Based on column type or pattern in name
+    if (column) {
+      // Foreign keys
+      if (column.is_foreign_key) {
+        if (column.foreign_table === 'health_systems' || columnId.includes('health_system')) {
+          return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
+        } else if (column.foreign_table === 'conferences' || columnId.includes('conference')) {
+          return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+        } else if (column.foreign_table === 'attendees' || columnId.includes('attendee')) {
+          return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
+        }
+        return <Icon icon={IdentificationIcon} size="sm" className="text-gray-400" />
+      }
+      
+      // Based on data types
+      if (column.data_type === 'date' || column.data_type.includes('timestamp')) {
+        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+      }
+      
+      // Specific ID fields
+      if (columnId === 'id' || columnId.endsWith('_id')) {
+        return <Icon icon={IdentificationIcon} size="sm" className="text-gray-400" />
+      }
+    }
+    
+    // Pattern matching on column names
+    if (columnId.includes('location') || columnId.includes('address') || 
+        columnId === 'city' || columnId === 'state' || columnId === 'zip') {
+      return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('website') || columnId.includes('url')) {
+      return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('created') || columnId.includes('updated')) {
+      return <Icon icon={ClockIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('note')) {
+      return <Icon icon={DocumentTextIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('linkedin')) {
+      return <Icon icon={LinkIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('certification')) {
+      return <Icon icon={AcademicCapIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('revenue') || columnId.includes('price')) {
+      return <Icon icon={CurrencyDollarIcon} size="sm" className="text-gray-400" />
+    }
+    
+    // Default icon
+    return <Icon icon={HashtagIcon} size="sm" className="text-gray-400" />
   }
 
   return (
@@ -148,87 +254,98 @@ export function FilterMenu({ columns, onFilterChange, isOpen, onToggle }: Filter
               </button>
             </div>
 
-            <div className="space-y-3">
-              {filters.map((filter) => (
-                <div
-                  key={filter.id}
-                  className={`p-3 rounded-lg border ${
-                    activeFilter?.id === filter.id
-                      ? 'border-primary-500 bg-primary-50'
-                      : 'border-gray-200'
-                  }`}
+            {loading ? (
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500 mx-auto"></div>
+                <p className="mt-2 text-sm text-gray-500">Loading columns...</p>
+              </div>
+            ) : tabColumns.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-gray-500">No columns available for filtering</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filters.map((filter) => (
+                  <div
+                    key={filter.id}
+                    className={`p-3 rounded-lg border ${
+                      activeFilter?.id === filter.id
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="relative w-full">
+                        <select
+                          value={filter.property}
+                          onChange={(e) => updateFilter(filter.id, { property: e.target.value })}
+                          className="block w-full pl-10 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
+                        >
+                          {tabColumns.map((column) => (
+                            <option key={column.id} value={column.id}>
+                              {column.header}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          {getColumnIcon(filter.property)}
+                        </div>
+                        <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                          <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeFilter(filter.id)}
+                        className="ml-2 text-gray-400 hover:text-gray-500"
+                      >
+                        <Icon icon={XMarkIcon} size="sm" />
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col space-y-2">
+                      <div className="relative">
+                        <select
+                          value={filter.operator}
+                          onChange={(e) => updateFilter(filter.id, { operator: e.target.value as FilterOperator })}
+                          className="block w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
+                        >
+                          {getOperatorOptions(filter.property).map((op) => (
+                            <option key={op.value} value={op.value}>
+                              {op.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                          <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      </div>
+
+                      {!['is_empty', 'is_not_empty'].includes(filter.operator) && (
+                        <input
+                          type="text"
+                          value={filter.value}
+                          onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                          placeholder="Value"
+                          className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                <button
+                  onClick={addFilter}
+                  className="w-full flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="relative w-full">
-                      <select
-                        value={filter.property}
-                        onChange={(e) => updateFilter(filter.id, { property: e.target.value })}
-                        className="block w-full pl-10 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
-                      >
-                        {columns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.header}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        {getColumnIcon(filter.property)}
-                      </div>
-                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
-                        <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => removeFilter(filter.id)}
-                      className="ml-2 text-gray-400 hover:text-gray-500"
-                    >
-                      <Icon icon={XMarkIcon} size="sm" />
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col space-y-2">
-                    <div className="relative">
-                      <select
-                        value={filter.operator}
-                        onChange={(e) => updateFilter(filter.id, { operator: e.target.value as FilterOperator })}
-                        className="block w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 appearance-none bg-white"
-                      >
-                        {getOperatorOptions(filter.property).map((op) => (
-                          <option key={op.value} value={op.value}>
-                            {op.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
-                        <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                    </div>
-
-                    {!['is_empty', 'is_not_empty'].includes(filter.operator) && (
-                      <input
-                        type="text"
-                        value={filter.value}
-                        onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
-                        placeholder="Value"
-                        className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
-                      />
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              <button
-                onClick={addFilter}
-                className="w-full flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
-              >
-                <Icon icon={PlusIcon} size="xs" className="mr-2" />
-                Add filter
-              </button>
-            </div>
+                  <Icon icon={PlusIcon} size="xs" className="mr-2" />
+                  Add filter
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -39,6 +39,7 @@ import { ApolloEnrichmentResponse } from '@/lib/apollo'
 import { handleEnrichmentComplete } from '@/lib/enrichment'
 import { DeleteResultsDialog } from '@/components/DeleteResultsDialog'
 import Image from 'next/image'
+import { AddEntityButton } from '@/components/AddEntityButton'
 
 // SelectAllButton component
 function SelectAllButton({ 
@@ -594,6 +595,8 @@ export default function Home() {
     const getColumnIcon = (columnId: string) => {
       switch (columnId) {
         case 'name':
+        case 'first_name':
+        case 'last_name':
           return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
         case 'email':
           return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
@@ -604,12 +607,35 @@ export default function Home() {
         case 'company':
           return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
         case 'location':
+        case 'address':
+        case 'city':
+        case 'state':
+        case 'zip':
           return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
         case 'website':
+        case 'linkedin_url':
           return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
         case 'date':
+        case 'start_date':
+        case 'end_date':
+        case 'created_at':
+        case 'updated_at':
           return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
         default:
+          // Try to determine icon based on columnId
+          if (columnId.includes('email')) {
+            return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
+          } else if (columnId.includes('phone')) {
+            return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />
+          } else if (columnId.includes('date')) {
+            return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+          } else if (columnId.includes('url') || columnId.includes('website')) {
+            return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
+          } else if (columnId.includes('address') || columnId.includes('location')) {
+            return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
+          } else if (columnId.includes('company') || columnId.includes('system')) {
+            return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
+          }
           return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />
       }
     }
@@ -617,11 +643,14 @@ export default function Home() {
     const getVisibleFields = (item: Attendee | HealthSystem | Conference) => {
       const fields: { label: string; value: string; icon: React.ReactNode }[] = []
       const visibleColumnIds = visibleColumns[activeTab]
-
-      columnOrder.forEach(id => {
-        if (id === 'name') return // Skip name field
-        if (!visibleColumnIds.includes(id)) return
-
+      
+      // Use columnOrder to maintain the same order as in table view
+      // If a column is in visibleColumnIds but not in columnOrder, it will be added at the end
+      const orderedVisibleColumns = columnOrder
+        .filter(id => visibleColumnIds.includes(id) && id !== 'name')
+        .concat(visibleColumnIds.filter(id => !columnOrder.includes(id) && id !== 'name'))
+      
+      orderedVisibleColumns.forEach(id => {
         const column = getAllColumns.find((col) => col.id === id)
         if (!column) return
 
@@ -652,21 +681,9 @@ export default function Home() {
           icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(attendee)}
           item={attendee}
-        >
-          <div className="space-y-2">
-            {getVisibleFields(attendee).map((field, index) => (
-              <div key={index} className="flex items-start">
-                <div className="flex items-center min-w-[100px] text-gray-500">
-                  <div className="w-5 h-5 mr-2">
-                    {field.icon}
-                  </div>
-                  <span>{field.label}:</span>
-                </div>
-                <span className="text-gray-900 ml-2">{field.value}</span>
-              </div>
-            ))}
-          </div>
-        </ItemCard>
+          itemType="attendee"
+          fields={getVisibleFields(attendee)}
+        />
       ))
     }
 
@@ -675,25 +692,13 @@ export default function Home() {
         <ItemCard
           key={healthSystem.id}
           title={healthSystem.name}
-          subtitle={`${healthSystem.city}, ${healthSystem.state}`}
+          subtitle={`${healthSystem.city || ''}, ${healthSystem.state || ''}`}
           icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(healthSystem)}
           item={healthSystem}
-        >
-          <div className="space-y-2">
-            {getVisibleFields(healthSystem).map((field, index) => (
-              <div key={index} className="flex items-start">
-                <div className="flex items-center min-w-[100px] text-gray-500">
-                  <div className="w-5 h-5 mr-2">
-                    {field.icon}
-                  </div>
-                  <span>{field.label}:</span>
-                </div>
-                <span className="text-gray-900 ml-2">{field.value}</span>
-              </div>
-            ))}
-          </div>
-        </ItemCard>
+          itemType="healthSystem"
+          fields={getVisibleFields(healthSystem)}
+        />
       ))
     }
 
@@ -705,21 +710,9 @@ export default function Home() {
         icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
         onClick={() => setSelectedItem(conference)}
         item={conference}
-      >
-        <div className="space-y-2">
-          {getVisibleFields(conference).map((field, index) => (
-            <div key={index} className="flex items-start">
-              <div className="flex items-center min-w-[100px] text-gray-500">
-                <div className="w-5 h-5 mr-2">
-                  {field.icon}
-                </div>
-                <span>{field.label}:</span>
-              </div>
-              <span className="text-gray-900 ml-2">{field.value}</span>
-            </div>
-          ))}
-        </div>
-      </ItemCard>
+        itemType="conference"
+        fields={getVisibleFields(conference)}
+      />
     ))
   }
 
@@ -766,6 +759,40 @@ export default function Home() {
       )
     }
 
+    // Check if there are no entities to display
+    const hasNoItems = currentItems.length === 0;
+    if (hasNoItems && !isLoading && !searchTerm && activeFilters.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 animate-fade-in">
+          <p className="text-gray-500 mb-4">
+            No {
+              activeTab === 'attendees' ? 'attendees' : 
+              activeTab === 'health-systems' ? 'health systems' : 
+              'conferences'
+            } available. Would you like to add one?
+          </p>
+          <AddEntityButton 
+            entityType={activeTab}
+            onEntityAdded={(newEntity) => {
+              // Add the new entity to the appropriate state array
+              if ('first_name' in newEntity) {
+                setAttendees([...attendees, newEntity as Attendee]);
+              } else if ('start_date' in newEntity) {
+                setConferences([...conferences, newEntity as Conference]);
+              } else {
+                setHealthSystems([...healthSystems, newEntity as HealthSystem]);
+              }
+            }}
+            currentConferenceName={
+              activeTab === 'conferences' && selectedItem 
+                ? (selectedItem as Conference).name 
+                : undefined
+            }
+          />
+        </div>
+      )
+    }
+
     return (
       <div className="space-y-6 animate-fade-in">
         {activeListId && activeTab === 'attendees' && (
@@ -797,18 +824,33 @@ export default function Home() {
           
           <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 whitespace-nowrap min-w-fit lg:w-auto lg:ml-auto relative z-40">
             <SelectAllButton items={currentItems} />
+            <AddEntityButton 
+              entityType={activeTab}
+              onEntityAdded={(newEntity) => {
+                // Add the new entity to the appropriate state array
+                if ('first_name' in newEntity) {
+                  setAttendees([...attendees, newEntity as Attendee]);
+                } else if ('start_date' in newEntity) {
+                  setConferences([...conferences, newEntity as Conference]);
+                } else {
+                  setHealthSystems([...healthSystems, newEntity as HealthSystem]);
+                }
+              }}
+              currentConferenceName={
+                activeTab === 'conferences' && selectedItem 
+                  ? (selectedItem as Conference).name 
+                  : undefined
+              }
+            />
             <FilterMenu
-              columns={getAllColumns.map(col => ({
-                id: String(col.id),
-                header: String(col.header)
-              }))}
+              activeTab={activeTab}
               onFilterChange={handleFilterChange}
               isOpen={activeMenu === 'filter'}
               onToggle={() => handleMenuToggle('filter')}
             />
             
             <PropertiesMenu
-              columns={getAllColumns}
+              activeTab={activeTab}
               visibleColumns={visibleColumns[activeTab]}
               onColumnToggle={handleColumnToggle}
               onColumnOrderChange={setColumnOrder}
@@ -866,7 +908,7 @@ export default function Home() {
             columnsPerRow === 1 ? 'grid-cols-1' :
             columnsPerRow === 2 ? 'grid-cols-1 sm:grid-cols-2' :
             columnsPerRow === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' :
-            'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+            'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
           }`}>
             {renderCardView()}
           </div>

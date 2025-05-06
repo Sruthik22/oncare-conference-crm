@@ -27,6 +27,7 @@ interface AttendeeDetailAdapterProps {
   onDelete?: (deletedAttendeeId: string) => void
   onHealthSystemClick?: (healthSystemId: string) => void
   onConferenceClick?: (conferenceId: string) => void
+  isNewEntity?: boolean
 }
 
 export const AttendeeDetailAdapter = ({
@@ -35,7 +36,8 @@ export const AttendeeDetailAdapter = ({
   onUpdate,
   onDelete,
   onHealthSystemClick,
-  onConferenceClick
+  onConferenceClick,
+  isNewEntity = false
 }: AttendeeDetailAdapterProps) => {
   // Define the fields for the attendee
   const attendeeFields: FieldDefinition[] = [
@@ -195,6 +197,14 @@ export const AttendeeDetailAdapter = ({
 
   // Function to fetch an attendee with all its relationships
   const fetchAttendeeWithRelationships = async (attendeeId: string) => {
+    // If this is a new entity that hasn't been saved yet, return a safe result
+    if (isNewEntity || attendeeId === 'new') {
+      return {
+        data: attendee,
+        error: null
+      };
+    }
+    
     // Fetch the attendee with health system and conference relationships
     const response = await supabase
       .from('attendees')
@@ -301,6 +311,7 @@ export const AttendeeDetailAdapter = ({
       showApolloIntegration={true}
       conferenceName={conferenceName}
       fetchWithRelationships={fetchAttendeeWithRelationships}
+      isNewEntity={isNewEntity}
     />
   );
 }; 

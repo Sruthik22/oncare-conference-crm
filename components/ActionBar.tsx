@@ -100,7 +100,7 @@ export function ActionBar({
   // Check if we have mixed selections (which we'll disallow for most operations)
   const hasMixedSelection = (hasAttendees ? 1 : 0) + (hasHealthSystems ? 1 : 0) + (hasConferences ? 1 : 0) > 1
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     try {
       setIsExporting(true)
       setError(null)
@@ -110,40 +110,95 @@ export function ActionBar({
         return
       }
       
+      // Generic function to escape CSV values
+      const escapeCSV = (value: any) => {
+        if (value === null || value === undefined) return ''
+        
+        // Handle array values
+        if (Array.isArray(value)) {
+          return escapeCSV(value.join('; '))
+        }
+        
+        // Convert to string if it's not already
+        const stringValue = typeof value === 'string' ? value : String(value)
+        // Escape quotes and wrap in quotes if contains comma, quote or newline
+        const needsQuotes = stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')
+        const escaped = stringValue.replace(/"/g, '""')
+        return needsQuotes ? `"${escaped}"` : escaped
+      }
+      
       if (hasAttendees) {
         const selectedAttendees = getSelectedAttendees()
+        const attendeeIds = selectedAttendees.map(a => a.id)
         
-        // Define CSV header for attendees
-        const csvHeader = [
-          'First Name', 
-          'Last Name', 
-          'Email', 
-          'Phone', 
-          'Title', 
-          'Company', 
-          'LinkedIn URL'
-        ].join(',')
+        // Fetch attendees with their relationships
+        const { data: attendeesWithRelationships, error: fetchError } = await supabase
+          .from('attendees')
+          .select(`
+            *,
+            health_systems(*),
+            attendee_conferences(
+              *,
+              conferences(*)
+            )
+          `)
+          .in('id', attendeeIds)
         
-        // Convert attendees to CSV rows
-        const csvRows = selectedAttendees.map(attendee => {
-          // Ensure values are escaped properly for CSV
-          const escapeCSV = (value: string | undefined) => {
-            if (!value) return ''
-            // Escape quotes and wrap in quotes if contains comma, quote or newline
-            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
-            const escaped = value.replace(/"/g, '""')
-            return needsQuotes ? `"${escaped}"` : escaped
-          }
-          
-          return [
-            escapeCSV(attendee.first_name),
-            escapeCSV(attendee.last_name),
-            escapeCSV(attendee.email),
-            escapeCSV(attendee.phone),
-            escapeCSV(attendee.title),
-            escapeCSV(attendee.health_systems?.name || attendee.company),
-            escapeCSV(attendee.linkedin_url)
-          ].join(',')
+        if (fetchError) {
+          throw new Error(`Failed to fetch attendee relationships: ${fetchError.message}`)
+        }
+        
+        // Get all keys from the first attendee in the database and the selected attendees
+        let allKeys = new Set<string>()
+        
+        // Basic attendee fields
+        attendeesWithRelationships?.forEach(attendee => {
+          Object.keys(attendee as Record<string, any>).forEach(key => {
+            // Skip relationship objects, we'll handle them specially
+            if (typeof (attendee as Record<string, any>)[key] !== 'object' || 
+                key === 'certifications' || 
+                (attendee as Record<string, any>)[key] === null) {
+              allKeys.add(key)
+            }
+          })
+        })
+        
+        // Add special relationship fields
+        allKeys.add('health_system_name')
+        allKeys.add('conferences')
+        
+        // Convert to array and sort
+        const allColumns = Array.from(allKeys).sort()
+        
+        // Create CSV header - convert snake_case to Title Case
+        const csvHeader = allColumns.map(key => {
+          return key.split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+        }).join(',')
+        
+        // Convert attendees to CSV rows with all properties
+        const csvRows = (attendeesWithRelationships || []).map(attendee => {
+          return allColumns.map(key => {
+            // Handle special relationship fields
+            if (key === 'health_system_name') {
+              return escapeCSV(attendee.health_systems?.name)
+            }
+            
+            if (key === 'conferences') {
+              // Extract conference names from the attendee_conferences relationship
+              if (attendee.attendee_conferences && Array.isArray(attendee.attendee_conferences)) {
+                const conferenceNames = attendee.attendee_conferences
+                  .map((ac: any) => ac.conferences?.name)
+                  .filter(Boolean)
+                return escapeCSV(conferenceNames.join('; '))
+              }
+              return escapeCSV('')
+            }
+            
+            // Handle normal fields
+            return escapeCSV((attendee as Record<string, any>)[key])
+          }).join(',')
         })
         
         // Combine header and rows
@@ -153,38 +208,65 @@ export function ActionBar({
         downloadCSV(csvContent, `${conferenceName || 'attendees'}_export`)
       } else if (hasHealthSystems) {
         const selectedHealthSystems = getSelectedHealthSystems()
+        const healthSystemIds = selectedHealthSystems.map(hs => hs.id)
         
-        // Define CSV header for health systems
-        const csvHeader = [
-          'Name',
-          'Website',
-          'Address',
-          'City',
-          'State',
-          'Zip',
-          'Definitive ID'
-        ].join(',')
+        // Fetch health systems with their associated attendees
+        const { data: healthSystemsWithRelationships, error: fetchError } = await supabase
+          .from('health_systems')
+          .select(`
+            *,
+            attendees(id, first_name, last_name, title, email, phone)
+          `)
+          .in('id', healthSystemIds)
         
-        // Convert health systems to CSV rows
-        const csvRows = selectedHealthSystems.map(system => {
-          // Ensure values are escaped properly for CSV
-          const escapeCSV = (value: string | undefined) => {
-            if (!value) return ''
-            // Escape quotes and wrap in quotes if contains comma, quote or newline
-            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
-            const escaped = value.replace(/"/g, '""')
-            return needsQuotes ? `"${escaped}"` : escaped
-          }
-          
-          return [
-            escapeCSV(system.name),
-            escapeCSV(system.website),
-            escapeCSV(system.address),
-            escapeCSV(system.city),
-            escapeCSV(system.state),
-            escapeCSV(system.zip),
-            escapeCSV(system.definitive_id)
-          ].join(',')
+        if (fetchError) {
+          throw new Error(`Failed to fetch health system relationships: ${fetchError.message}`)
+        }
+        
+        // Get all keys from the health systems
+        let allKeys = new Set<string>()
+        
+        // Basic health system fields
+        healthSystemsWithRelationships?.forEach(system => {
+          Object.keys(system as Record<string, any>).forEach(key => {
+            // Skip relationship objects, we'll handle them specially
+            if (typeof (system as Record<string, any>)[key] !== 'object' || 
+                (system as Record<string, any>)[key] === null) {
+              allKeys.add(key)
+            }
+          })
+        })
+        
+        // Add special relationship fields
+        allKeys.add('associated_attendees')
+        
+        // Convert to array and sort
+        const allColumns = Array.from(allKeys).sort()
+        
+        // Create CSV header - convert snake_case to Title Case
+        const csvHeader = allColumns.map(key => {
+          return key.split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+        }).join(',')
+        
+        // Convert health systems to CSV rows with all properties
+        const csvRows = (healthSystemsWithRelationships || []).map(system => {
+          return allColumns.map(key => {
+            // Handle special relationship fields
+            if (key === 'associated_attendees') {
+              // Extract attendee names from the relationship
+              if (system.attendees && Array.isArray(system.attendees)) {
+                const attendeeNames = system.attendees
+                  .map((att: any) => `${att.first_name} ${att.last_name}${att.title ? ` (${att.title})` : ''}`)
+                return escapeCSV(attendeeNames.join('; '))
+              }
+              return escapeCSV('')
+            }
+            
+            // Handle normal fields
+            return escapeCSV((system as Record<string, any>)[key])
+          }).join(',')
         })
         
         // Combine header and rows
@@ -194,32 +276,77 @@ export function ActionBar({
         downloadCSV(csvContent, `health_systems_export`)
       } else if (hasConferences) {
         const selectedConferences = getSelectedConferences()
+        const conferenceIds = selectedConferences.map(c => c.id)
         
-        // Define CSV header for conferences
-        const csvHeader = [
-          'Name',
-          'Start Date',
-          'End Date',
-          'Location'
-        ].join(',')
+        // Fetch conferences with their attendees
+        const { data: conferencesWithRelationships, error: fetchError } = await supabase
+          .from('conferences')
+          .select(`
+            *,
+            attendee_conferences(
+              *,
+              attendees(id, first_name, last_name, title, company, email, phone)
+            )
+          `)
+          .in('id', conferenceIds)
         
-        // Convert conferences to CSV rows
-        const csvRows = selectedConferences.map(conference => {
-          // Ensure values are escaped properly for CSV
-          const escapeCSV = (value: string | undefined) => {
-            if (!value) return ''
-            // Escape quotes and wrap in quotes if contains comma, quote or newline
-            const needsQuotes = value.includes(',') || value.includes('"') || value.includes('\n')
-            const escaped = value.replace(/"/g, '""')
-            return needsQuotes ? `"${escaped}"` : escaped
-          }
-          
-          return [
-            escapeCSV(conference.name),
-            escapeCSV(conference.start_date),
-            escapeCSV(conference.end_date),
-            escapeCSV(conference.location)
-          ].join(',')
+        if (fetchError) {
+          throw new Error(`Failed to fetch conference relationships: ${fetchError.message}`)
+        }
+        
+        // Get all keys from the conferences
+        let allKeys = new Set<string>()
+        
+        // Basic conference fields
+        conferencesWithRelationships?.forEach(conference => {
+          Object.keys(conference as Record<string, any>).forEach(key => {
+            // Skip relationship objects, we'll handle them specially
+            if (typeof (conference as Record<string, any>)[key] !== 'object' || 
+                (conference as Record<string, any>)[key] === null) {
+              allKeys.add(key)
+            }
+          })
+        })
+        
+        // Add special relationship fields
+        allKeys.add('attendees_count')
+        allKeys.add('attendees_list')
+        
+        // Convert to array and sort
+        const allColumns = Array.from(allKeys).sort()
+        
+        // Create CSV header - convert snake_case to Title Case
+        const csvHeader = allColumns.map(key => {
+          return key.split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ')
+        }).join(',')
+        
+        // Convert conferences to CSV rows with all properties
+        const csvRows = (conferencesWithRelationships || []).map(conference => {
+          return allColumns.map(key => {
+            // Handle special relationship fields
+            if (key === 'attendees_count') {
+              return escapeCSV(conference.attendee_conferences?.length || 0)
+            }
+            
+            if (key === 'attendees_list') {
+              // Extract attendee names from the relationship
+              if (conference.attendee_conferences && Array.isArray(conference.attendee_conferences)) {
+                const attendeeNames = conference.attendee_conferences
+                  .filter((ac: any) => ac.attendees) // Only include those with attendee data
+                  .map((ac: any) => {
+                    const att = ac.attendees
+                    return `${att.first_name} ${att.last_name}${att.title ? ` (${att.title})` : ''}`
+                  })
+                return escapeCSV(attendeeNames.join('; '))
+              }
+              return escapeCSV('')
+            }
+            
+            // Handle normal fields
+            return escapeCSV((conference as Record<string, any>)[key])
+          }).join(',')
         })
         
         // Combine header and rows

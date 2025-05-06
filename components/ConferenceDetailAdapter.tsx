@@ -12,13 +12,15 @@ interface ConferenceDetailAdapterProps {
   onUpdate?: (updatedConference: Conference) => void
   onDelete?: (deletedConferenceId: string) => void
   onAttendeeClick?: (attendeeId: string) => void
+  isNewEntity?: boolean
 }
 
 export const ConferenceDetailAdapter = ({
   conference,
   onUpdate,
   onDelete,
-  onAttendeeClick
+  onAttendeeClick,
+  isNewEntity = false
 }: ConferenceDetailAdapterProps) => {
   // Define the fields for the conference
   const conferenceFields: FieldDefinition[] = [
@@ -147,6 +149,14 @@ export const ConferenceDetailAdapter = ({
 
   // Function to fetch a conference with all its relationships
   const fetchConferenceWithRelationships = async (conferenceId: string) => {
+    // If this is a new entity that hasn't been saved yet, return a safe result
+    if (isNewEntity || conferenceId === 'new') {
+      return {
+        data: conference,
+        error: null
+      };
+    }
+    
     // Fetch the conference with attendee relationships
     const response = await supabase
       .from('conferences')
@@ -183,6 +193,7 @@ export const ConferenceDetailAdapter = ({
       onUpdate={onUpdate as (updatedEntity: any) => void}
       onDelete={onDelete}
       fetchWithRelationships={fetchConferenceWithRelationships}
+      isNewEntity={isNewEntity}
     />
   );
 }; 

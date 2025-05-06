@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { PlusIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import { supabase } from '@/lib/supabase';
 
 export interface List {
@@ -23,6 +23,7 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
   const [error, setError] = useState<string | null>(null);
   const [newListName, setNewListName] = useState(defaultListName || '');
   const [isCreatingList, setIsCreatingList] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (defaultListName) {
@@ -43,7 +44,8 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
       // Fetch all lists
       const { data: listsData, error: listsError } = await supabase
         .from('lists')
-        .select('id, name');
+        .select('id, name')
+        .order('name');
       
       if (listsError) throw new Error(listsError.message);
       
@@ -130,6 +132,11 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
     }
   };
 
+  // Filter lists based on search term
+  const filteredLists = lists.filter(list => 
+    list.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <Transition appear show={isOpen} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -157,7 +164,8 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-white p-6 text-left align-middle shadow-xl transition-all">
-                <Dialog.Title className="text-lg font-medium text-gray-900 mb-4">
+                <Dialog.Title className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                  <SparklesIcon className="h-5 w-5 text-indigo-500 mr-2" />
                   Select or Create List
                 </Dialog.Title>
 
@@ -175,6 +183,11 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
                       onChange={(e) => setNewListName(e.target.value)}
                       placeholder="New list name..."
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newListName.trim()) {
+                          handleCreateList();
+                        }
+                      }}
                     />
                     <button
                       onClick={handleCreateList}
@@ -182,7 +195,7 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
                       className="ml-2 inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isCreatingList ? (
-                        <span className="animate-spin">⌛</span>
+                        <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full" />
                       ) : (
                         <PlusIcon className="h-5 w-5" />
                       )}
@@ -191,24 +204,48 @@ export function ListModal({ isOpen, onClose, onListSelected, defaultListName, re
                 </div>
 
                 <div className="border-t border-gray-200 pt-4">
-                  <h3 className="text-sm font-medium text-gray-900 mb-2">Existing Lists</h3>
-                  {isLoading ? (
-                    <div className="text-center py-4">
-                      <span className="animate-spin">⌛</span>
-                      <span className="ml-2 text-gray-500">Loading lists...</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-medium text-gray-900">Existing Lists</h3>
+                    <div className="text-xs text-gray-500">
+                      {filteredLists.length} list{filteredLists.length !== 1 ? 's' : ''}
                     </div>
-                  ) : lists.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">No lists found</p>
+                  </div>
+                  
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search lists..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  
+                  {isLoading ? (
+                    <div className="text-center py-6">
+                      <div className="animate-spin h-8 w-8 border-b-2 border-indigo-500 rounded-full mx-auto"></div>
+                      <p className="mt-2 text-sm text-gray-500">Loading lists...</p>
+                    </div>
+                  ) : filteredLists.length === 0 ? (
+                    <div className="text-center py-6 bg-gray-50 rounded-md">
+                      {searchTerm ? (
+                        <p className="text-sm text-gray-500">No lists match your search</p>
+                      ) : (
+                        <p className="text-sm text-gray-500">No lists found. Create your first list above.</p>
+                      )}
+                    </div>
                   ) : (
-                    <div className="max-h-60 overflow-y-auto">
-                      {lists.map((list) => (
+                    <div className="max-h-60 overflow-y-auto border border-gray-100 rounded-md">
+                      {filteredLists.map((list) => (
                         <button
                           key={list.id}
                           onClick={() => handleSelectList(list.name)}
-                          className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-md text-sm text-gray-700 flex items-center justify-between"
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 text-sm text-gray-700 flex items-center justify-between group"
                         >
-                          <span>{list.name}</span>
-                          <span className="text-gray-500 text-xs">{list.count} contacts</span>
+                          <div className="flex items-center">
+                            <span className="font-medium group-hover:text-indigo-600">{list.name}</span>
+                          </div>
+                          <span className="text-gray-500 text-xs">{list.count} contact{list.count !== 1 ? 's' : ''}</span>
                         </button>
                       ))}
                     </div>

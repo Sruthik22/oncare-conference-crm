@@ -15,6 +15,7 @@ interface HealthSystemDetailAdapterProps {
   onDelete?: (deletedHealthSystemId: string) => void
   onAttendeeClick?: (attendeeId: string) => void
   linkedAttendees?: Array<{id: string, first_name: string, last_name: string}>
+  isNewEntity?: boolean
 }
 
 export const HealthSystemDetailAdapter = ({
@@ -22,7 +23,8 @@ export const HealthSystemDetailAdapter = ({
   onUpdate,
   onDelete,
   onAttendeeClick,
-  linkedAttendees = []
+  linkedAttendees = [],
+  isNewEntity = false
 }: HealthSystemDetailAdapterProps) => {
   // Define the fields for the health system
   const healthSystemFields: FieldDefinition[] = [
@@ -142,41 +144,46 @@ export const HealthSystemDetailAdapter = ({
 
   // Function to fetch a health system with all its relationships
   const fetchHealthSystemWithRelationships = async (healthSystemId: string) => {
-    // Fetch both the health system and its related attendees
-    const healthSystemResponse = await supabase
+    // If this is a new entity that hasn't been saved yet, return a safe result
+    if (isNewEntity || healthSystemId === 'new') {
+      return {
+        data: healthSystem,
+        error: null
+      };
+    }
+    
+    // Fetch the health system
+    const response = await supabase
       .from('health_systems')
       .select('*')
       .eq('id', healthSystemId)
       .single();
-      
-    if (healthSystemResponse.error) {
-      console.error('Error fetching health system:', healthSystemResponse.error);
+    
+    if (response.error) {
       return {
         data: null,
-        error: healthSystemResponse.error
+        error: response.error
       };
     }
     
-    // Fetch attendees linked to this health system
-    const attendeesResponse = await supabase
-      .from('attendees')
-      .select('id, first_name, last_name, title, company')
-      .eq('health_system_id', healthSystemId)
-      .order('last_name');
-    
-    if (attendeesResponse.error) {
-      console.error('Error fetching linked attendees:', attendeesResponse.error);
+    // Combine with provided linked attendees if any
+    if (linkedAttendees && linkedAttendees.length > 0) {
+      response.data.attendees = linkedAttendees;
+    } else {
+      // Fetch attendees linked to this health system
+      const attendeesResponse = await supabase
+        .from('attendees')
+        .select('id, first_name, last_name, title, company')
+        .eq('health_system_id', healthSystemId);
+      
+      if (!attendeesResponse.error) {
+        response.data.attendees = attendeesResponse.data || [];
+      }
     }
     
-    // Combine the data
-    const healthSystemData = healthSystemResponse.data;
-    healthSystemData.attendees = attendeesResponse.data || [];
-    
-    console.log('Health system relationships fetched:', healthSystemData);
-    
     return {
-      data: healthSystemData,
-      error: attendeesResponse.error
+      data: response.data,
+      error: null
     };
   };
 
@@ -189,9 +196,11 @@ export const HealthSystemDetailAdapter = ({
       fields={healthSystemFields}
       tags={healthSystemTags}
       title={(entity) => (entity as HealthSystem).name}
+      subtitle={(entity) => `${(entity as HealthSystem).city || ''}, ${(entity as HealthSystem).state || ''}`}
       onUpdate={onUpdate as (updatedEntity: any) => void}
       onDelete={onDelete}
       fetchWithRelationships={fetchHealthSystemWithRelationships}
+      isNewEntity={isNewEntity}
     />
   );
 }; 

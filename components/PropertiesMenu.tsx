@@ -12,18 +12,25 @@ import {
   GlobeAltIcon,
   CalendarIcon,
   ViewColumnsIcon,
+  DocumentTextIcon,
+  LinkIcon,
+  IdentificationIcon,
+  ClockIcon,
+  AcademicCapIcon,
+  CurrencyDollarIcon
 } from '@heroicons/react/24/outline'
 import { createSwapy } from 'swapy'
 import debounce from 'lodash/debounce'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
+import { useDatabaseSchema } from '@/hooks/useDatabaseSchema'
 
 // TODO: drag and drop doesn't work on the columns
 
 type ColumnType = ColumnDef<Attendee | HealthSystem | Conference>
 
 interface PropertiesMenuProps {
-  columns: ColumnType[]
+  activeTab: string
   visibleColumns: string[]
   onColumnToggle: (columnId: string) => void
   onColumnOrderChange: (newOrder: string[]) => void
@@ -33,7 +40,7 @@ interface PropertiesMenuProps {
 }
 
 export function PropertiesMenu({
-  columns,
+  activeTab,
   visibleColumns,
   onColumnToggle,
   onColumnOrderChange,
@@ -45,6 +52,21 @@ export function PropertiesMenu({
   const [searchQuery, setSearchQuery] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const swapyRef = useRef<ReturnType<typeof createSwapy> | null>(null)
+  const { columns, loading } = useDatabaseSchema()
+
+  // Get columns for the active tab
+  const tabColumns = columns.filter(col => {
+    switch (activeTab) {
+      case 'attendees':
+        return col.table === 'attendees'
+      case 'health-systems':
+        return col.table === 'health_systems'
+      case 'conferences':
+        return col.table === 'conferences'
+      default:
+        return false
+    }
+  })
 
   // Memoize the debounced search function
   const debouncedSetSearch = debounce((value: string) => {
@@ -59,8 +81,14 @@ export function PropertiesMenu({
   }
 
   const getColumnIcon = (columnId: string) => {
+    // Get column info
+    const column = tabColumns.find(c => c.id === columnId)
+    
+    // Based on column name
     switch (columnId) {
       case 'name':
+      case 'first_name':
+      case 'last_name':
         return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
       case 'email':
         return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
@@ -70,19 +98,69 @@ export function PropertiesMenu({
         return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />
       case 'company':
         return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
-      case 'location':
-        return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
-      case 'website':
-        return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
-      case 'date':
-        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
-      default:
-        return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />
     }
+    
+    // Based on column type or pattern in name
+    if (column) {
+      // Foreign keys
+      if (column.is_foreign_key) {
+        if (column.foreign_table === 'health_systems' || columnId.includes('health_system')) {
+          return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
+        } else if (column.foreign_table === 'conferences' || columnId.includes('conference')) {
+          return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+        } else if (column.foreign_table === 'attendees' || columnId.includes('attendee')) {
+          return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
+        }
+        return <Icon icon={IdentificationIcon} size="sm" className="text-gray-400" />
+      }
+      
+      // Based on data types
+      if (column.data_type === 'date' || column.data_type.includes('timestamp')) {
+        return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
+      }
+      
+      // Specific ID fields
+      if (columnId === 'id' || columnId.endsWith('_id')) {
+        return <Icon icon={IdentificationIcon} size="sm" className="text-gray-400" />
+      }
+    }
+    
+    // Pattern matching on column names
+    if (columnId.includes('location') || columnId.includes('address') || 
+        columnId === 'city' || columnId === 'state' || columnId === 'zip') {
+      return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('website') || columnId.includes('url')) {
+      return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('created') || columnId.includes('updated')) {
+      return <Icon icon={ClockIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('note')) {
+      return <Icon icon={DocumentTextIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('linkedin')) {
+      return <Icon icon={LinkIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('certification')) {
+      return <Icon icon={AcademicCapIcon} size="sm" className="text-gray-400" />
+    }
+    
+    if (columnId.includes('revenue') || columnId.includes('price')) {
+      return <Icon icon={CurrencyDollarIcon} size="sm" className="text-gray-400" />
+    }
+    
+    // Default icon
+    return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />
   }
 
   // Filter columns based on search query
-  const filteredColumns = columns.filter((column) => {
+  const filteredColumns = tabColumns.filter((column) => {
     if (!searchQuery) return true
     const headerStr = String(column.header).toLowerCase()
     return headerStr.includes(searchQuery.toLowerCase()) && column.id !== 'name'
@@ -114,7 +192,7 @@ export function PropertiesMenu({
         swapyRef.current.destroy()
       }
     }
-  }, [columns, view, onColumnOrderChange])
+  }, [tabColumns, view, onColumnOrderChange])
 
   const renderPropertiesList = () => {
     const shownColumns = filteredColumns.filter(column => 
@@ -125,6 +203,23 @@ export function PropertiesMenu({
     )
 
     const viewText = view === 'cards' ? 'Card' : 'Table'
+
+    if (loading) {
+      return (
+        <div className="text-center py-4">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500 mx-auto"></div>
+          <p className="mt-2 text-sm text-gray-500">Loading columns...</p>
+        </div>
+      )
+    }
+
+    if (filteredColumns.length === 0) {
+      return (
+        <div className="text-center py-4">
+          <p className="text-sm text-gray-500">No properties available for this entity</p>
+        </div>
+      )
+    }
 
     return (
       <div className="space-y-4">

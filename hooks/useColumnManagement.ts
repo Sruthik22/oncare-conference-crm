@@ -24,18 +24,36 @@ export function useColumnManagement({
   view,
   columns,
 }: UseColumnManagementProps): UseColumnManagementResult {
+  // Initialize with default visible columns for each tab
   const [visibleColumns, setVisibleColumns] = useState<Record<TabType, string[]>>({
     attendees: ['name', 'email', 'phone', 'title', 'company'],
     'health-systems': ['name', 'location', 'website'],
     conferences: ['name', 'date', 'location'],
   })
+  
+  // Detect and add custom columns
+  useEffect(() => {
+    if (columns.length) {
+      // Add any existing columns not already in visibleColumns
+      const customColumns = columns
+        .filter(col => col.id && col.id !== 'name' && !visibleColumns[activeTab].includes(col.id as string))
+        .map(col => col.id as string);
+      
+      if (customColumns.length) {
+        setVisibleColumns(prev => ({
+          ...prev,
+          [activeTab]: [...prev[activeTab], ...customColumns]
+        }));
+      }
+    }
+  }, [columns, activeTab]);
+
+  // Track column order separately from visibility
   const [columnOrder, setColumnOrder] = useState<string[]>([])
 
-  // Initialize columnOrder when view changes
+  // Initialize columnOrder when view changes or when active tab changes
   useEffect(() => {
-    if (view === 'cards') {
-      setColumnOrder(visibleColumns[activeTab])
-    }
+    setColumnOrder(visibleColumns[activeTab]);
   }, [view, activeTab, visibleColumns])
 
   const handleColumnToggle = (columnId: string) => {
@@ -66,11 +84,37 @@ export function useColumnManagement({
 
   const getVisibleColumns = () => {
     const currentVisibleColumns = visibleColumns[activeTab]
-    // Always include the name column if it exists
+    
+    // Use columnOrder for consistent ordering between views
+    const orderedColumns: ColumnDef<Attendee | HealthSystem | Conference>[] = [];
+    
+    // Always include the name column first if it exists
     const nameColumn = columns.find(col => col.id === 'name')
-    return nameColumn 
-      ? [nameColumn, ...columns.filter(col => col.id !== 'name' && currentVisibleColumns.includes(col.id as string))]
-      : columns.filter(col => currentVisibleColumns.includes(col.id as string))
+    if (nameColumn) {
+      orderedColumns.push(nameColumn);
+    }
+    
+    // Add remaining columns in the order specified by columnOrder
+    columnOrder.forEach(id => {
+      if (id !== 'name' && currentVisibleColumns.includes(id)) {
+        const col = columns.find(col => col.id === id);
+        if (col) {
+          orderedColumns.push(col);
+        }
+      }
+    });
+    
+    // Add any visible columns that are not in columnOrder
+    currentVisibleColumns.forEach(id => {
+      if (id !== 'name' && !columnOrder.includes(id)) {
+        const col = columns.find(col => col.id === id);
+        if (col) {
+          orderedColumns.push(col);
+        }
+      }
+    });
+    
+    return orderedColumns;
   }
 
   return {

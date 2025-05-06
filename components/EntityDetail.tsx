@@ -75,6 +75,7 @@ interface EntityDetailProps {
   showApolloIntegration?: boolean
   conferenceName?: string
   fetchWithRelationships?: (entityId: string) => Promise<{ data: EntityTypes | null, error: any }>
+  isNewEntity?: boolean
 }
 
 export const EntityDetail = ({
@@ -90,9 +91,10 @@ export const EntityDetail = ({
   onDelete,
   showApolloIntegration = false,
   conferenceName,
-  fetchWithRelationships
+  fetchWithRelationships,
+  isNewEntity = false
 }: EntityDetailProps) => {
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditing, setIsEditing] = useState(isNewEntity)
   const [editData, setEditData] = useState<EntityTypes | null>({ ...entity })
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,6 +113,11 @@ export const EntityDetail = ({
   // Fetch available tag items when needed
   useEffect(() => {
     const fetchAvailableItems = async () => {
+      // Skip API calls for new entities that aren't in the database yet
+      if (isNewEntity) {
+        return;
+      }
+      
       // Create an object to hold all tag options
       const tagItems: Record<string, any[]> = {};
       
@@ -132,12 +139,21 @@ export const EntityDetail = ({
     if (tags.some(tag => tag.addable)) {
       fetchAvailableItems();
     }
-  }, [entity, tags]);
+  }, [entity, tags, isNewEntity]);
 
   // Handle adding a tag
   const handleAddTag = (tagKey: string) => {
     setIsAddingTag(tagKey);
     setShowTagSelection(true);
+    
+    // Skip API calls for new entities that aren't in the database yet
+    if (isNewEntity) {
+      setAvailableTagItems(prev => ({
+        ...prev,
+        [tagKey]: []
+      }));
+      return;
+    }
     
     // Immediately fetch available items for this tag type
     const tagDef = tags.find(t => t.key === tagKey);
@@ -170,6 +186,14 @@ export const EntityDetail = ({
     
     const tagDef = tags.find(t => t.key === isAddingTag);
     if (!tagDef || !tagDef.onAdd) return;
+    
+    // // Skip API calls for new entities that aren't in the database yet
+    // if (isNewEntity) {
+    //   console.log('Cannot add relationship on a new entity that has not been saved');
+    //   setError('Please save the entity first before adding relationships');
+    //   setIsTagActionInProgress(false);
+    //   return;
+    // }
     
     setIsTagActionInProgress(true);
     setError(null);
@@ -299,6 +323,12 @@ export const EntityDetail = ({
   // Handle removing a tag
   const handleRemoveTag = async (tagDef: TagDefinition, item: any) => {
     if (!tagDef.onRemove) return;
+    
+    // // Skip API calls for new entities that aren't in the database yet
+    // if (isNewEntity) {
+    //   console.log('Cannot remove relationship on a new entity that has not been saved');
+    //   return;
+    // }
     
     setIsTagActionInProgress(true);
     setError(null);
@@ -745,6 +775,13 @@ export const EntityDetail = ({
     );
   };
 
+  // Helper to generate human-readable labels from entity keys
+  const toLabel = (key: string) =>
+    key
+      .replace(/_/g, ' ')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (str) => str.toUpperCase());
+
   if (isEditing && editData) {
     // Edit mode - render form with inputs
     return (
@@ -1029,6 +1066,28 @@ export const EntityDetail = ({
           );
         })}
         
+        {/* Auto-render any other entity properties */}
+        {Object.entries(entity).map(([key, value]) => {
+          if (fields.find(f => f.key === key)) return null;
+          return (
+            <div key={key} className="grid grid-cols-3 gap-4 py-4">
+              <div className="col-span-1 flex items-center">
+                <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
+                <span className="text-sm font-medium text-gray-500">{toLabel(key)}</span>
+              </div>
+              <div className="col-span-2 text-sm">
+                {typeof value === 'object' ? (
+                  <div className="bg-gray-50 p-3 rounded-md">
+                    <p className="whitespace-pre-line text-gray-700">{JSON.stringify(value, null, 2)}</p>
+                  </div>
+                ) : (
+                  <span className="text-gray-900">{String(value)}</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
         {tags.map((tagDef, tagIdx) => {
           const items = tagDef.getItems(entity);
           
