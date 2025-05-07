@@ -79,7 +79,7 @@ const CardView = memo(({
 }: { 
   items: Array<Attendee | HealthSystem | Conference>
   activeTab: 'attendees' | 'health-systems' | 'conferences'
-  getFieldsForItem: (item: Attendee | HealthSystem | Conference) => Array<{ key: string, label: string, value: string }>
+  getFieldsForItem: (item: Attendee | HealthSystem | Conference) => Array<{ label: string, value: string, iconName: IconName }>
   onItemClick: (item: Attendee | HealthSystem | Conference) => void
 }) => {
   if (activeTab === 'attendees') {
@@ -107,7 +107,7 @@ const CardView = memo(({
           <ItemCard
             key={healthSystem.id}
             title={(healthSystem as HealthSystem).name}
-            subtitle={`${(healthSystem as HealthSystem).city || ''}, ${(healthSystem as HealthSystem).state || ''}`}
+            subtitle={((healthSystem as HealthSystem).city && (healthSystem as HealthSystem).state) ? `${(healthSystem as HealthSystem).city}, ${(healthSystem as HealthSystem).state}` : ''}
             icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
             onClick={() => onItemClick(healthSystem)}
             item={healthSystem}
