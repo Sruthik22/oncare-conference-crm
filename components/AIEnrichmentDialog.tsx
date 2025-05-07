@@ -3,15 +3,26 @@ import { Dialog, Transition } from '@headlessui/react'
 import { XMarkIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
 import { aiService } from '@/lib/ai'
+import type { ColumnDef } from '@tanstack/react-table'
+import type { Attendee, HealthSystem, Conference } from '@/types'
 
 interface AIEnrichmentDialogProps {
   isOpen: boolean
   onClose: () => void
-  items: any[]
+  items: Array<Attendee | HealthSystem | Conference>
   onEnrichmentComplete: (results: any[], columnName: string) => void
+  allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
+  isLoading?: boolean
 }
 
-export function AIEnrichmentDialog({ isOpen, onClose, items, onEnrichmentComplete }: AIEnrichmentDialogProps) {
+export function AIEnrichmentDialog({ 
+  isOpen, 
+  onClose, 
+  items, 
+  onEnrichmentComplete,
+  allColumns = [],
+  isLoading = false
+}: AIEnrichmentDialogProps) {
   const [columnName, setColumnName] = useState('')
   const [columnType, setColumnType] = useState('text')
   const [promptText, setPromptText] = useState('')
@@ -32,14 +43,8 @@ export function AIEnrichmentDialog({ isOpen, onClose, items, onEnrichmentComplet
   const editorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   
-  // Get available variables from the first item
-  const availableVariables = items.length > 0 
-    ? Object.keys(items[0]).filter(key => 
-        typeof items[0][key] === 'string' || 
-        typeof items[0][key] === 'number' ||
-        typeof items[0][key] === 'boolean'
-      )
-    : [];
+  // Get available variables from allColumns
+  const availableVariables = allColumns.map(column => String(column.id));
 
   // Filter variables based on search text
   const filteredVariables = availableVariables.filter(variable => 
@@ -699,193 +704,213 @@ export function AIEnrichmentDialog({ isOpen, onClose, items, onEnrichmentComplet
                       Enrich with AI
                     </Dialog.Title>
                     
-                    <form onSubmit={handleSubmit} className="mt-4">
-                      <div className="mb-4">
-                        <label htmlFor="columnName" className="block text-sm font-medium text-gray-700">
-                          Column Name
-                        </label>
-                        <div className="mt-2 relative">
-                          <input
-                            type="text"
-                            id="columnName"
-                            value={columnName}
-                            onChange={(e) => setColumnName(e.target.value)}
-                            className="block w-full pl-3 pr-3 py-2.5 text-sm bg-white border border-gray-200 
-                                      rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
-                                      focus:border-primary-500 transition-all duration-200"
-                            placeholder="e.g., is_health_system"
-                            required
-                          />
-                        </div>
-                        <p className="mt-1 text-xs text-blue-600">
-                          If this column doesn&apos;t exist, it will be automatically created in the database.
-                        </p>
+                    {isLoading ? (
+                      <div className="py-8 text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
+                        <p className="mt-2 text-sm text-gray-500">Loading data...</p>
                       </div>
-                      
-                      <div className="mb-4">
-                        <label htmlFor="columnType" className="block text-sm font-medium text-gray-700">
-                          Column Type
-                        </label>
-                        <div className="mt-2">
-                          <select
-                            id="columnType"
-                            value={columnType}
-                            onChange={(e) => setColumnType(e.target.value)}
-                            className="block w-full px-3 py-2.5 text-sm bg-white border border-gray-200 
-                                      rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
-                                      focus:border-primary-500 transition-all duration-200"
-                          >
-                            <option value="text">Text</option>
-                            <option value="boolean">Boolean (Yes/No)</option>
-                            <option value="number">Number</option>
-                          </select>
-                        </div>
-                      </div>
-                      
-                      <div className="mb-4">
-                        <label htmlFor="promptTemplate" className="block text-sm font-medium text-gray-700">
-                          Prompt Template
-                        </label>
-                        
-                        <div className="relative">
-                          {/* Rich editable prompt field */}
-                          <div 
-                            ref={editorRef}
-                            contentEditable
-                            className="mt-2 min-h-[160px] max-h-[320px] px-3 py-2.5 border border-gray-200 
-                                      rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
-                                      focus:border-primary-500 transition-all duration-200 overflow-y-auto text-sm"
-                            onInput={handleInput}
-                            onKeyDown={handleKeyDown}
-                            onFocus={handleEditorFocus}
-                            onBlur={handleEditorBlur}
-                            spellCheck="false"
-                            data-placeholder="Enter your prompt here. Type @ to insert variables..."
-                          ></div>
-                          
-                          {/* Variable selection menu */}
-                          {showVarMenu && (
-                            <div 
-                              ref={menuRef}
-                              className="absolute bg-white border border-gray-200 rounded-md shadow-lg z-10 max-h-[200px] overflow-y-auto w-60"
-                              style={{ 
-                                top: `${menuPosition.top}px`, 
-                                left: `${menuPosition.left}px` 
-                              }}
-                            >
-                              <ul className="py-1 text-sm">
-                                {filteredVariables.length > 0 ? (
-                                  filteredVariables.map((variable, index) => (
-                                    <li 
-                                      key={variable}
-                                      className={`px-3 py-2 cursor-pointer flex items-center ${
-                                        index === selectedVarIndex ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-100'
-                                      }`}
-                                      onClick={() => insertVariable(variable)}
-                                    >
-                                      <span className={index === selectedVarIndex ? 'font-medium' : ''}>{variable}</span>
-                                    </li>
-                                  ))
-                                ) : (
-                                  <li className="px-3 py-2 text-gray-500">No matching variables</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="mt-3">
-                          <p className="text-xs text-gray-500">
-                            <span className="font-medium">Available variables:</span> Type @ to access
-                          </p>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {availableVariables.map(variable => (
-                              <span
-                                key={variable}
-                                className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 cursor-pointer hover:bg-indigo-200"
-                                onClick={() => insertAvailableVariable(variable)}
-                              >
-                                {variable}
-                              </span>
-                            ))}
+                    ) : (
+                      <form onSubmit={handleSubmit} className="mt-4">
+                        <div className="mb-4">
+                          <label htmlFor="columnName" className="block text-sm font-medium text-gray-700">
+                            Column Name
+                          </label>
+                          <div className="mt-2 relative">
+                            <input
+                              type="text"
+                              id="columnName"
+                              value={columnName}
+                              onChange={(e) => setColumnName(e.target.value)}
+                              className="block w-full pl-3 pr-3 py-2.5 text-sm bg-white border border-gray-200 
+                                        rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
+                                        focus:border-primary-500 transition-all duration-200"
+                              placeholder="e.g., is_health_system"
+                              required
+                              list="column-suggestions"
+                            />
+                            <datalist id="column-suggestions">
+                              {allColumns.map((column) => (
+                                <option key={String(column.id)} value={String(column.id)}>
+                                  {String(column.header)}
+                                </option>
+                              ))}
+                            </datalist>
                           </div>
-                        </div>
-
-                        <div className="mt-3">
-                          <p className="text-xs text-gray-500">
-                            <span className="font-medium">Example prompt for health systems:</span> Is {'{{'} name {'}}' } a health system or healthcare provider? Research this organization and respond with yes or no.
+                          <p className="mt-1 text-xs text-blue-600">
+                            If this column doesn&apos;t exist, it will be automatically created in the database.
                           </p>
                         </div>
-                      </div>
-                      
-                      {testResult && (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-md border border-gray-200">
-                          <h4 className="text-sm font-medium text-gray-700">Test Result</h4>
+                        
+                        <div className="mb-4">
+                          <label htmlFor="columnType" className="block text-sm font-medium text-gray-700">
+                            Column Type
+                          </label>
                           <div className="mt-2">
-                            <p className="text-sm text-gray-600">
-                              <span className="font-medium">Raw response:</span> {testResult.rawResponse}
+                            <select
+                              id="columnType"
+                              value={columnType}
+                              onChange={(e) => setColumnType(e.target.value)}
+                              className="block w-full px-3 py-2.5 text-sm bg-white border border-gray-200 
+                                        rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
+                                        focus:border-primary-500 transition-all duration-200"
+                            >
+                              <option value="text">Text</option>
+                              <option value="boolean">Boolean (Yes/No)</option>
+                              <option value="number">Number</option>
+                            </select>
+                          </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <label htmlFor="promptTemplate" className="block text-sm font-medium text-gray-700">
+                            Prompt Template
+                          </label>
+                          
+                          <div className="relative">
+                            {/* Rich editable prompt field */}
+                            <div 
+                              ref={editorRef}
+                              contentEditable
+                              className="mt-2 min-h-[160px] max-h-[320px] px-3 py-2.5 border border-gray-200 
+                                        rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
+                                        focus:border-primary-500 transition-all duration-200 overflow-y-auto text-sm"
+                              onInput={handleInput}
+                              onKeyDown={handleKeyDown}
+                              onFocus={handleEditorFocus}
+                              onBlur={handleEditorBlur}
+                              spellCheck="false"
+                              data-placeholder="Enter your prompt here. Type @ to insert variables..."
+                            ></div>
+                            
+                            {/* Variable selection menu */}
+                            {showVarMenu && (
+                              <div 
+                                ref={menuRef}
+                                className="absolute bg-white border border-gray-200 rounded-md shadow-lg z-10 max-h-[200px] overflow-y-auto w-60"
+                                style={{ 
+                                  top: `${menuPosition.top}px`, 
+                                  left: `${menuPosition.left}px` 
+                                }}
+                              >
+                                <ul className="py-1 text-sm">
+                                  {filteredVariables.length > 0 ? (
+                                    filteredVariables.map((variable, index) => (
+                                      <li 
+                                        key={variable}
+                                        className={`px-3 py-2 cursor-pointer flex items-center ${
+                                          index === selectedVarIndex ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-100'
+                                        }`}
+                                        onClick={() => insertVariable(variable)}
+                                      >
+                                        <span className={index === selectedVarIndex ? 'font-medium' : ''}>{variable}</span>
+                                      </li>
+                                    ))
+                                  ) : (
+                                    <li className="px-3 py-2 text-gray-500">No matching variables</li>
+                                  )}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-3">
+                            <p className="text-xs text-gray-500">
+                              <span className="font-medium">Available variables:</span> Type @ to access
                             </p>
-                            <p className="text-sm text-gray-600 mt-1">
-                              <span className="font-medium">Processed value:</span> {
-                                typeof testResult.result === 'boolean' 
-                                  ? (testResult.result ? 'Yes' : 'No')
-                                  : String(testResult.result)
-                              }
+                            
+                            {allColumns.length > 0 && (
+                              <>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {allColumns.map(column => (
+                                    <span
+                                      key={String(column.id)}
+                                      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 cursor-pointer hover:bg-blue-200"
+                                      onClick={() => insertAvailableVariable(String(column.id))}
+                                    >
+                                      {String(column.header)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="mt-3">
+                            <p className="text-xs text-gray-500">
+                              <span className="font-medium">Example prompt for health systems:</span> Is {'{{'} name {'}}' } a health system or healthcare provider? Research this organization and respond with yes or no.
                             </p>
                           </div>
                         </div>
-                      )}
+                        
+                        {testResult && (
+                          <div className="mb-4 p-3 bg-gray-50 rounded-md border border-gray-200">
+                            <h4 className="text-sm font-medium text-gray-700">Test Result</h4>
+                            <div className="mt-2">
+                              <p className="text-sm text-gray-600">
+                                <span className="font-medium">Raw response:</span> {testResult.rawResponse}
+                              </p>
+                              <p className="text-sm text-gray-600 mt-1">
+                                <span className="font-medium">Processed value:</span> {
+                                  typeof testResult.result === 'boolean' 
+                                    ? (testResult.result ? 'Yes' : 'No')
+                                    : String(testResult.result)
+                                }
+                              </p>
+                            </div>
+                          </div>
+                        )}
 
-                      {error && (
-                        <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md border border-red-200">
-                          {error}
+                        {error && (
+                          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md border border-red-200">
+                            {error}
+                          </div>
+                        )}
+                        
+                        <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse space-x-3 space-x-reverse">
+                          <button
+                            type="submit"
+                            disabled={isEnriching}
+                            className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:ml-3 sm:w-auto disabled:bg-indigo-300 disabled:cursor-not-allowed"
+                          >
+                            {isEnriching ? (
+                              <>
+                                {processIcon}
+                                Processing...
+                              </>
+                            ) : (
+                              <>Enrich {items.length} items</>
+                            )}
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={handleTestPrompt}
+                            disabled={isTesting || !items.length}
+                            className="inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                          >
+                            {isTesting ? (
+                              <>
+                                {processIcon}
+                                Testing...
+                              </>
+                            ) : (
+                              <>
+                                {sendIcon}
+                                Test on first item
+                              </>
+                            )}
+                          </button>
+                          
+                          <button
+                            type="button"
+                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                            onClick={onClose}
+                          >
+                            Cancel
+                          </button>
                         </div>
-                      )}
-                      
-                      <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse space-x-3 space-x-reverse">
-                        <button
-                          type="submit"
-                          disabled={isEnriching}
-                          className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:ml-3 sm:w-auto disabled:bg-indigo-300 disabled:cursor-not-allowed"
-                        >
-                          {isEnriching ? (
-                            <>
-                              {processIcon}
-                              Processing...
-                            </>
-                          ) : (
-                            <>Enrich {items.length} items</>
-                          )}
-                        </button>
-                        
-                        <button
-                          type="button"
-                          onClick={handleTestPrompt}
-                          disabled={isTesting || !items.length}
-                          className="inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        >
-                          {isTesting ? (
-                            <>
-                              {processIcon}
-                              Testing...
-                            </>
-                          ) : (
-                            <>
-                              {sendIcon}
-                              Test on first item
-                            </>
-                          )}
-                        </button>
-                        
-                        <button
-                          type="button"
-                          className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
-                          onClick={onClose}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
+                      </form>
+                    )}
                   </div>
                 </div>
               </Dialog.Panel>

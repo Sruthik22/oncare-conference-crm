@@ -1080,6 +1080,8 @@ export default function Home() {
           activeListId={activeListId}
           onListDelete={handleListDelete}
           refreshLists={fetchLists}
+          allColumns={allColumns}
+          isLoading={isLoading}
         />
       </main>
     </SelectionProvider>

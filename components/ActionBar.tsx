@@ -14,6 +14,7 @@ import { PushToApolloResultsDialog } from './PushToApolloResultsDialog'
 import { ListModal } from './ListModal'
 import { AddToListResultsDialog } from './AddToListResultsDialog'
 import { supabase } from '@/lib/supabase'
+import type { ColumnDef } from '@tanstack/react-table'
 
 interface ActionBarProps {
   onEnrichmentComplete: (enrichedData: ApolloEnrichmentResponse) => void
@@ -24,6 +25,8 @@ interface ActionBarProps {
   activeListId?: string | null
   onListDelete?: (listId: string) => void
   refreshLists?: () => Promise<void>
+  allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
+  isLoading?: boolean
 }
 
 export function ActionBar({ 
@@ -34,7 +37,9 @@ export function ActionBar({
   conferenceName = '',
   activeListId = null,
   onListDelete,
-  refreshLists
+  refreshLists,
+  allColumns = [],
+  isLoading = false
 }: ActionBarProps) {
   const { selectedItems, deselectAll } = useSelection()
   const [isEnriching, setIsEnriching] = useState(false)
@@ -1155,6 +1160,7 @@ export function ActionBar({
         onClose={() => setIsAIEnrichmentModalOpen(false)}
         items={selectedItems}
         onEnrichmentComplete={(results, columnName) => handleAIEnrichmentComplete(results, columnName)}
+        allColumns={allColumns}
       />
       
       <AIEnrichmentResultsDialog
