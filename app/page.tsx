@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo } from 'react'
 import { DataTable } from '@/components/DataTable'
 import { SearchBar } from '@/components/SearchBar'
 import { FilterMenu } from '@/components/FilterMenu'
@@ -16,18 +16,12 @@ import { SelectionProvider, useSelection } from '@/lib/context/SelectionContext'
 import { Auth } from '@/components/Auth'
 import { useAuth } from '@/hooks/useAuth'
 import type { Attendee, HealthSystem, Conference } from '@/types'
-import { ColumnDef, CellContext } from '@tanstack/react-table'
+import { ColumnDef } from '@tanstack/react-table'
 import { 
   UserIcon, 
   BuildingOfficeIcon, 
-  CalendarIcon, 
-  MapPinIcon,
-  EnvelopeIcon,
+  CalendarIcon,
   ArrowLeftIcon,
-  PhoneIcon,
-  BriefcaseIcon,
-  GlobeAltIcon,
-  ViewColumnsIcon,
 } from '@heroicons/react/24/outline'
 import { Icon } from '@/components/Icon'
 import { useDataFetching } from '@/hooks/useDataFetching'
@@ -42,25 +36,27 @@ import Image from 'next/image'
 import { AddEntityButton } from '@/components/AddEntityButton'
 
 // SelectAllButton component
-function SelectAllButton({ 
+const SelectAllButton = memo(({ 
   items
 }: { 
   items: Attendee[] | HealthSystem[] | Conference[]
-}) {
+}) => {
   const { selectAll, deselectAll, selectedItems } = useSelection()
   
   // Check if all items are already selected
-  const allSelected = items.length > 0 && items.every(item => 
-    selectedItems.some(selected => selected.id === item.id)
+  const allSelected = useMemo(() => 
+    items.length > 0 && items.every(item => 
+      selectedItems.some(selected => selected.id === item.id)
+    ), [items, selectedItems]
   );
   
-  const handleClick = () => {
+  const handleClick = useCallback(() => {
     if (allSelected) {
       deselectAll();
     } else {
       selectAll(items);
     }
-  };
+  }, [allSelected, deselectAll, selectAll, items]);
   
   return (
     <button
@@ -70,7 +66,142 @@ function SelectAllButton({
       {allSelected ? 'Deselect All' : 'Select All'}
     </button>
   )
-}
+});
+
+SelectAllButton.displayName = 'SelectAllButton';
+
+// Extract card view into a separate memoized component
+const CardView = memo(({ 
+  items, 
+  activeTab, 
+  getFieldsForItem, 
+  onItemClick 
+}: { 
+  items: Array<Attendee | HealthSystem | Conference>
+  activeTab: 'attendees' | 'health-systems' | 'conferences'
+  getFieldsForItem: (item: Attendee | HealthSystem | Conference) => Array<{ key: string, label: string, value: string }>
+  onItemClick: (item: Attendee | HealthSystem | Conference) => void
+}) => {
+  if (activeTab === 'attendees') {
+    return (
+      <>
+        {items.map((attendee) => (
+          <ItemCard
+            key={attendee.id}
+            title={`${(attendee as Attendee).first_name} ${(attendee as Attendee).last_name}`}
+            subtitle={(attendee as Attendee).title}
+            icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
+            onClick={() => onItemClick(attendee)}
+            item={attendee}
+            fields={getFieldsForItem(attendee)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  if (activeTab === 'health-systems') {
+    return (
+      <>
+        {items.map((healthSystem) => (
+          <ItemCard
+            key={healthSystem.id}
+            title={(healthSystem as HealthSystem).name}
+            subtitle={`${(healthSystem as HealthSystem).city || ''}, ${(healthSystem as HealthSystem).state || ''}`}
+            icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
+            onClick={() => onItemClick(healthSystem)}
+            item={healthSystem}
+            fields={getFieldsForItem(healthSystem)}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {items.map((conference) => (
+        <ItemCard
+          key={conference.id}
+          title={(conference as Conference).name}
+          subtitle={(conference as Conference).location}
+          icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
+          onClick={() => onItemClick(conference)}
+          item={conference}
+          fields={getFieldsForItem(conference)}
+        />
+      ))}
+    </>
+  );
+});
+
+CardView.displayName = 'CardView';
+
+// Extract the selected item detail rendering into a memoized component
+const SelectedItemDetail = memo(({ 
+  selectedItem,
+  attendees,
+  onAttendeeUpdate,
+  onAttendeeDelete,
+  onHealthSystemClick,
+  onConferenceClick,
+  onAttendeeClick,
+  onHealthSystemUpdate,
+  onHealthSystemDelete,
+  onConferenceUpdate,
+  onConferenceDelete
+}: { 
+  selectedItem: Attendee | HealthSystem | Conference
+  attendees: Attendee[]
+  onAttendeeUpdate: (updatedAttendee: Attendee) => void
+  onAttendeeDelete: (deletedAttendeeId: string) => void
+  onHealthSystemClick: (healthSystemId: string) => void
+  onConferenceClick: (conferenceId: string) => void
+  onAttendeeClick: (attendeeId: string) => void
+  onHealthSystemUpdate: (updatedHealthSystem: HealthSystem) => void
+  onHealthSystemDelete: (healthSystemId: string) => void
+  onConferenceUpdate: (updatedConference: Conference) => void
+  onConferenceDelete: (conferenceId: string) => void
+}) => {
+  if ('first_name' in selectedItem) {
+    const attendee = selectedItem as Attendee;
+    const conferenceName = attendee.attendee_conferences?.[0]?.conferences?.name || 'Unknown Conference';
+    return <AttendeeDetailAdapter 
+      attendee={attendee} 
+      conferenceName={conferenceName}
+      onUpdate={onAttendeeUpdate}
+      onDelete={onAttendeeDelete}
+      onHealthSystemClick={onHealthSystemClick}
+      onConferenceClick={onConferenceClick}
+    />
+  } else if ('start_date' in selectedItem) {
+    return <ConferenceDetailAdapter 
+      conference={selectedItem} 
+      onUpdate={onConferenceUpdate}
+      onDelete={onConferenceDelete}
+      onAttendeeClick={onAttendeeClick}
+    />
+  } else {
+    // Find attendees linked to this health system
+    const linkedAttendees = attendees
+      .filter(att => att.health_system_id === selectedItem.id)
+      .map(att => ({
+        id: att.id,
+        first_name: att.first_name,
+        last_name: att.last_name
+      }));
+    
+    return <HealthSystemDetailAdapter 
+      healthSystem={selectedItem} 
+      onUpdate={onHealthSystemUpdate}
+      onDelete={onHealthSystemDelete}
+      onAttendeeClick={onAttendeeClick}
+      linkedAttendees={linkedAttendees}
+    />
+  }
+});
+
+SelectedItemDetail.displayName = 'SelectedItemDetail';
 
 export default function Home() {
   const [view, setView] = useState<'table' | 'cards'>('cards')
@@ -138,20 +269,29 @@ export default function Home() {
     activeFilters,
   })
 
-  const handleSearch = (term: string) => {
-    setSearchTerm(term)
-  }
+  // Memoize current items based on active tab to prevent unnecessary recalculations
+  const currentItems = useMemo(() => {
+    return activeTab === 'attendees' 
+      ? filteredAttendees 
+      : activeTab === 'health-systems' 
+        ? filteredHealthSystems 
+        : filteredConferences;
+  }, [activeTab, filteredAttendees, filteredHealthSystems, filteredConferences]);
 
-  const handleFilterChange = (filters: Array<{
+  const handleSearch = useCallback((term: string) => {
+    setSearchTerm(term);
+  }, []);
+
+  const handleFilterChange = useCallback((filters: Array<{
     id: string
     property: string
     operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
     value: string
   }>) => {
-    setActiveFilters(filters)
-  }
+    setActiveFilters(filters);
+  }, []);
 
-  const handleConferenceUpdate = async (updatedConference: Conference) => {
+  const handleConferenceUpdate = useCallback(async (updatedConference: Conference) => {
     console.log('Updating conference with data:', updatedConference);
     
     // Only update base fields, not relationships
@@ -198,9 +338,9 @@ export default function Home() {
       }
       return updatedConference;
     });
-  }
+  }, []);
 
-  const handleHealthSystemUpdate = async (updatedHealthSystem: HealthSystem) => {
+  const handleHealthSystemUpdate = useCallback(async (updatedHealthSystem: HealthSystem) => {
     console.log('Updating health system with data:', updatedHealthSystem);
     
     // Only update base fields, not relationships
@@ -250,9 +390,9 @@ export default function Home() {
       }
       return updatedHealthSystem;
     });
-  }
+  }, []);
 
-  const handleHealthSystemDelete = async (healthSystemId: string) => {
+  const handleHealthSystemDelete = useCallback(async (healthSystemId: string) => {
     try {
       const { error } = await supabase
         .from('health_systems')
@@ -274,9 +414,9 @@ export default function Home() {
     } catch (err) {
       console.error('Unexpected error deleting health system:', err)
     }
-  }
+  }, []);
 
-  const handleConferenceDelete = async (conferenceId: string) => {
+  const handleConferenceDelete = useCallback(async (conferenceId: string) => {
     try {
       const { error } = await supabase
         .from('conferences')
@@ -300,185 +440,192 @@ export default function Home() {
     } catch (err) {
       console.error('Unexpected error deleting conference:', err);
     }
-  };
+  }, [selectedItem]);
 
-  const handleEnrichmentCompleteWrapper = async (enrichedData: ApolloEnrichmentResponse) => {
+  const handleEnrichmentCompleteWrapper = useCallback(async (enrichedData: ApolloEnrichmentResponse) => {
     try {
       await handleEnrichmentComplete(enrichedData, attendees, setAttendees);
     } catch (error) {
       console.error('Error in enrichment wrapper:', error);
     }
-  };
+  }, [attendees]);
 
-  // Update handleBulkDelete to handle different entity types
-  const handleBulkDelete = async (selectedItems: Array<Attendee | HealthSystem | Conference>) => {
-    try {
-      // Separate items by type
-      const attendeesToDelete = selectedItems.filter((item): item is Attendee => 
-        'first_name' in item && 'last_name' in item
-      );
-      
-      const healthSystemsToDelete = selectedItems.filter((item): item is HealthSystem => 
-        'name' in item && !('first_name' in item) && !('start_date' in item)
-      );
-      
-      const conferencesToDelete = selectedItems.filter((item): item is Conference => 
-        'name' in item && 'start_date' in item
-      );
-      
-      // Handle each type appropriately
-      if (attendeesToDelete.length > 0) {
-        await handleAttendeesDelete(attendeesToDelete);
-      }
-      
-      if (healthSystemsToDelete.length > 0) {
-        for (const healthSystem of healthSystemsToDelete) {
-          await handleHealthSystemDelete(healthSystem.id);
-        }
-      }
-      
-      if (conferencesToDelete.length > 0) {
-        for (const conference of conferencesToDelete) {
-          await handleConferenceDelete(conference.id);
-        }
-      }
-    } catch (error) {
-      console.error('Error in bulk delete:', error);
+  // Handle attendee updates (memoize)
+  const handleAttendeeUpdate = useCallback((updatedAttendee: Attendee) => {
+    // Update the selected item with the enriched data
+    setSelectedItem(updatedAttendee);
+    // Update the attendees list
+    setAttendees(prevAttendees => 
+      prevAttendees.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
+    );
+  }, []);
+
+  // Handle attendee deletion (memoize)
+  const handleAttendeeDelete = useCallback((deletedAttendeeId: string) => {
+    // Clear the selected item
+    setSelectedItem(null);
+    // Remove the deleted attendee from the list
+    setAttendees(prevAttendees => 
+      prevAttendees.filter(a => a.id !== deletedAttendeeId)
+    );
+  }, []);
+
+  // Memoize the entity item click handler
+  const handleItemClick = useCallback((item: Attendee | HealthSystem | Conference) => {
+    setSelectedItem(item);
+  }, []);
+
+  // Memoize the back button click handler
+  const handleBackClick = useCallback(() => {
+    setSelectedItem(null);
+  }, []);
+
+  // Memoize entity addition handler
+  const handleEntityAdded = useCallback((newEntity: Attendee | HealthSystem | Conference) => {
+    // Add the new entity to the appropriate state array
+    if ('first_name' in newEntity) {
+      setAttendees(prev => [...prev, newEntity as Attendee]);
+    } else if ('start_date' in newEntity) {
+      setConferences(prev => [...prev, newEntity as Conference]);
+    } else {
+      setHealthSystems(prev => [...prev, newEntity as HealthSystem]);
     }
-  };
-  
-  const handleHealthSystemClick = (healthSystemId: string) => {
+  }, []);
+
+  // Memoize menu toggle handler
+  const handleMenuToggle = useCallback((menu: 'filter' | 'properties' | 'view-settings') => {
+    // If clicking the same menu that's open, close it
+    setActiveMenu(prev => prev === menu ? null : menu);
+  }, []);
+
+  // Memoize tab change handler
+  const handleTabChange = useCallback((tab: 'attendees' | 'health-systems' | 'conferences') => {
+    // Reset selectedItem when changing tabs
+    setSelectedItem(null);
+    setActiveTab(tab);
+  }, []);
+
+  // Memoize handleAttendeesDelete function
+  const handleAttendeesDelete = useCallback(async (attendeesToDelete: Attendee[]) => {
+    if (!attendeesToDelete || attendeesToDelete.length === 0) return;
+    
+    const results: Array<{
+      attendee: Attendee;
+      success: boolean;
+      error?: string;
+    }> = [];
+    
+    // Process each attendee sequentially
+    for (const attendee of attendeesToDelete) {
+      try {
+        const { error } = await supabase
+          .from('attendees')
+          .delete()
+          .eq('id', attendee.id);
+         
+        if (error) {
+          console.error(`Error deleting attendee ${attendee.id}:`, error);
+          results.push({
+            attendee,
+            success: false,
+            error: error.message
+          });
+        } else {
+          results.push({
+            attendee,
+            success: true
+          });
+        }
+      } catch (err) {
+        console.error(`Unexpected error deleting attendee ${attendee.id}:`, err);
+        results.push({
+          attendee,
+          success: false,
+          error: err instanceof Error ? err.message : 'An unexpected error occurred'
+        });
+      }
+    }
+    
+    // Store results and show the dialog
+    setDeleteResults(results);
+    setShowDeleteResults(true);
+    
+    // Update the attendees list by removing successfully deleted attendees
+    const successfullyDeletedIds = results
+      .filter(result => result.success)
+      .map(result => result.attendee.id);
+    
+    setAttendees(prevAttendees => 
+      prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
+    );
+  }, []);
+
+  const handleHealthSystemClick = useCallback((healthSystemId: string) => {
     // Find the health system and set it as the selected item
     const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
     if (healthSystem) {
       setActiveTab('health-systems');
       setSelectedItem(healthSystem);
     }
-  }
+  }, [healthSystems]);
   
-  const handleConferenceClick = (conferenceId: string) => {
+  const handleConferenceClick = useCallback((conferenceId: string) => {
     // Find the conference and set it as the selected item
     const conference = conferences.find(conf => conf.id === conferenceId);
     if (conference) {
       setActiveTab('conferences');
       setSelectedItem(conference);
     }
-  }
+  }, [conferences]);
   
-  const handleAttendeeClick = (attendeeId: string) => {
+  const handleAttendeeClick = useCallback((attendeeId: string) => {
     // Find the attendee and set it as the selected item
     const attendee = attendees.find(att => att.id === attendeeId);
     if (attendee) {
       setActiveTab('attendees');
       setSelectedItem(attendee);
     }
-  }
+  }, [attendees]);
   
-  const renderSelectedItemDetail = () => {
-    if (!selectedItem) return null
-
-    if ('first_name' in selectedItem) {
-      const attendee = selectedItem as Attendee;
-      const conferenceName = attendee.attendee_conferences?.[0]?.conferences?.name || 'Unknown Conference';
-      return <AttendeeDetailAdapter 
-        attendee={attendee} 
-        conferenceName={conferenceName}
-        onUpdate={(updatedAttendee) => {
-          // Update the selected item with the enriched data
-          setSelectedItem(updatedAttendee);
-          // Update the attendees list
-          setAttendees(prevAttendees => 
-            prevAttendees.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
-          );
-        }}
-        onDelete={(deletedAttendeeId) => {
-          // Clear the selected item
-          setSelectedItem(null);
-          // Remove the deleted attendee from the list
-          setAttendees(prevAttendees => 
-            prevAttendees.filter(a => a.id !== deletedAttendeeId)
-          );
-        }}
-        onHealthSystemClick={handleHealthSystemClick}
-        onConferenceClick={handleConferenceClick}
-      />
-    } else if ('start_date' in selectedItem) {
-      return <ConferenceDetailAdapter 
-        conference={selectedItem} 
-        onUpdate={handleConferenceUpdate}
-        onDelete={handleConferenceDelete}
-        onAttendeeClick={handleAttendeeClick}
-      />
-    } else {
-      // Find attendees linked to this health system
-      const linkedAttendees = attendees
-        .filter(att => att.health_system_id === selectedItem.id)
-        .map(att => ({
-          id: att.id,
-          first_name: att.first_name,
-          last_name: att.last_name
-        }));
+  const handleListSelect = useCallback(async (listId: string | null) => {
+    setActiveListId(listId)
+    
+    if (!listId) {
+      // If no list is selected, clear the list filter
+      setListFilteredAttendees([])
+      return
+    }
+    
+    try {
+      // Fetch attendees that belong to the selected list
+      const { data, error } = await supabase
+        .from('attendee_lists')
+        .select(`
+          attendee_id,
+          attendees:attendee_id(*)
+        `)
+        .eq('list_id', listId)
       
-      return <HealthSystemDetailAdapter 
-        healthSystem={selectedItem} 
-        onUpdate={handleHealthSystemUpdate}
-        onDelete={handleHealthSystemDelete}
-        onAttendeeClick={handleAttendeeClick}
-        linkedAttendees={linkedAttendees}
-      />
+      if (error) throw error
+      
+      if (!data || data.length === 0) {
+        setListFilteredAttendees([])
+        return
+      }
+      
+      // Extract attendees from the join query
+      const attendeesInList = data
+        .map(item => item.attendees as unknown as Attendee)
+        .filter(Boolean)
+      setListFilteredAttendees(attendeesInList)
+    } catch (err) {
+      console.error('Error fetching attendees for list:', err)
+      setListFilteredAttendees([])
     }
-  }
+  }, []);
 
-  const renderCardView = () => {
-    if (activeTab === 'attendees') {
-      return filteredAttendees.map((attendee) => (
-        <ItemCard
-          key={attendee.id}
-          title={`${attendee.first_name} ${attendee.last_name}`}
-          subtitle={attendee.title}
-          icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
-          onClick={() => setSelectedItem(attendee)}
-          item={attendee}
-          fields={getFieldsForItem(attendee)}
-        />
-      ))
-    }
-
-    if (activeTab === 'health-systems') {
-      return filteredHealthSystems.map((healthSystem) => (
-        <ItemCard
-          key={healthSystem.id}
-          title={healthSystem.name}
-          subtitle={`${healthSystem.city || ''}, ${healthSystem.state || ''}`}
-          icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
-          onClick={() => setSelectedItem(healthSystem)}
-          item={healthSystem}
-          fields={getFieldsForItem(healthSystem)}
-        />
-      ))
-    }
-
-    return filteredConferences.map((conference) => (
-      <ItemCard
-        key={conference.id}
-        title={conference.name}
-        subtitle={conference.location}
-        icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
-        onClick={() => setSelectedItem(conference)}
-        item={conference}
-        fields={getFieldsForItem(conference)}
-      />
-    ))
-  }
-
-  const renderContent = () => {
-    // Get current filtered items based on active tab
-    const currentItems = activeTab === 'attendees' 
-      ? filteredAttendees 
-      : activeTab === 'health-systems' 
-        ? filteredHealthSystems 
-        : filteredConferences;
-
+  // Replace renderCardView with the memoized component
+  const renderContent = useCallback(() => {
     // Show loading indicator
     if (isLoading) {
       return (
@@ -502,14 +649,26 @@ export default function Home() {
       return (
         <div className="space-y-6 animate-fade-in">
           <button
-            onClick={() => setSelectedItem(null)}
+            onClick={handleBackClick}
             className="inline-flex items-center text-gray-600 hover:text-gray-900 transition-colors"
           >
             <Icon icon={ArrowLeftIcon} size="xs" className="mr-1 text-gray-400" />
             Back to list
           </button>
           
-          {renderSelectedItemDetail()}
+          <SelectedItemDetail 
+            selectedItem={selectedItem}
+            attendees={attendees}
+            onAttendeeUpdate={handleAttendeeUpdate}
+            onAttendeeDelete={handleAttendeeDelete}
+            onHealthSystemClick={handleHealthSystemClick}
+            onConferenceClick={handleConferenceClick}
+            onAttendeeClick={handleAttendeeClick}
+            onHealthSystemUpdate={handleHealthSystemUpdate}
+            onHealthSystemDelete={handleHealthSystemDelete}
+            onConferenceUpdate={handleConferenceUpdate}
+            onConferenceDelete={handleConferenceDelete}
+          />
         </div>
       )
     }
@@ -528,16 +687,7 @@ export default function Home() {
           </p>
           <AddEntityButton 
             entityType={activeTab}
-            onEntityAdded={(newEntity) => {
-              // Add the new entity to the appropriate state array
-              if ('first_name' in newEntity) {
-                setAttendees([...attendees, newEntity as Attendee]);
-              } else if ('start_date' in newEntity) {
-                setConferences([...conferences, newEntity as Conference]);
-              } else {
-                setHealthSystems([...healthSystems, newEntity as HealthSystem]);
-              }
-            }}
+            onEntityAdded={handleEntityAdded}
             currentConferenceName={
               activeTab === 'conferences' && selectedItem 
                 ? (selectedItem as Conference).name 
@@ -581,16 +731,7 @@ export default function Home() {
             <SelectAllButton items={currentItems} />
             <AddEntityButton 
               entityType={activeTab}
-              onEntityAdded={(newEntity) => {
-                // Add the new entity to the appropriate state array
-                if ('first_name' in newEntity) {
-                  setAttendees([...attendees, newEntity as Attendee]);
-                } else if ('start_date' in newEntity) {
-                  setConferences([...conferences, newEntity as Conference]);
-                } else {
-                  setHealthSystems([...healthSystems, newEntity as HealthSystem]);
-                }
-              }}
+              onEntityAdded={handleEntityAdded}
               currentConferenceName={
                 activeTab === 'conferences' && selectedItem 
                   ? (selectedItem as Conference).name 
@@ -666,76 +807,31 @@ export default function Home() {
             columnsPerRow === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' :
             'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
           }`}>
-            {renderCardView()}
+            <CardView 
+              items={currentItems}
+              activeTab={activeTab}
+              getFieldsForItem={getFieldsForItem}
+              onItemClick={handleItemClick}
+            />
           </div>
         )}
       </div>
     )
-  }
-
-  const handleMenuToggle = (menu: 'filter' | 'properties' | 'view-settings') => {
-    // If clicking the same menu that's open, close it
-    if (activeMenu === menu) {
-      setActiveMenu(null)
-    } else {
-      // Otherwise, open the clicked menu and close any others
-      setActiveMenu(menu)
-    }
-  }
-
-  // Add a click outside handler to close all menus
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as HTMLElement
-      // Check if click is outside of any menu button or menu content
-      if (!target.closest('.menu-button') && !target.closest('.menu-content')) {
-        setActiveMenu(null)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const handleListSelect = async (listId: string | null) => {
-    setActiveListId(listId)
-    
-    if (!listId) {
-      // If no list is selected, clear the list filter
-      setListFilteredAttendees([])
-      return
-    }
-    
-    try {
-      // Fetch attendees that belong to the selected list
-      const { data, error } = await supabase
-        .from('attendee_lists')
-        .select(`
-          attendee_id,
-          attendees:attendee_id(*)
-        `)
-        .eq('list_id', listId)
-      
-      if (error) throw error
-      
-      if (!data || data.length === 0) {
-        setListFilteredAttendees([])
-        return
-      }
-      
-      // Extract attendees from the join query
-      const attendeesInList = data
-        .map(item => item.attendees as unknown as Attendee)
-        .filter(Boolean)
-      setListFilteredAttendees(attendeesInList)
-    } catch (err) {
-      console.error('Error fetching attendees for list:', err)
-      setListFilteredAttendees([])
-    }
-  }
+  }, [
+    isLoading, error, selectedItem, currentItems, searchTerm, activeFilters,
+    activeTab, activeListId, lists, view, columnsPerRow, activeMenu,
+    filteredAttendees, filteredHealthSystems, filteredConferences,
+    handleBackClick, handleSearch, handleFilterChange, handleMenuToggle,
+    handleEntityAdded, handleItemClick, attendees,
+    handleHealthSystemClick, handleConferenceClick, handleAttendeeClick,
+    handleHealthSystemUpdate, handleHealthSystemDelete, 
+    handleConferenceUpdate, handleConferenceDelete,
+    handleAttendeeUpdate, handleAttendeeDelete,
+    getFieldsForItem, getVisibleColumns
+  ]);
 
   // Fetch lists function to be shared between components
-  const fetchLists = async () => {
+  const fetchLists = useCallback(async () => {
     try {
       // Fetch all lists
       const { data: listsData, error: listsError } = await supabase
@@ -769,15 +865,15 @@ export default function Home() {
       console.error('Failed to fetch lists', err)
       setLists([])
     }
-  }
+  }, []);
 
   // Fetch lists when component mounts
   useEffect(() => {
     fetchLists()
-  }, [])
+  }, [fetchLists])
 
   // Function to handle deleting a list
-  const handleListDelete = async (listId: string) => {
+  const handleListDelete = useCallback(async (listId: string) => {
     try {
       // First, delete all attendee_lists associations
       const { error: deleteAssociationsError } = await supabase
@@ -810,10 +906,10 @@ export default function Home() {
       console.error('Failed to delete list:', err);
       alert('Failed to delete list: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
-  };
+  }, [fetchLists]);
 
   // Handle AI enrichment completion
-  const handleAIEnrichmentComplete = async (enrichedData: any) => {
+  const handleAIEnrichmentComplete = useCallback(async (enrichedData: any) => {
     console.log('AI Enrichment completed:', enrichedData)
     
     // Determine which data type was enriched and refresh accordingly
@@ -852,10 +948,10 @@ export default function Home() {
         }
       }
     }
-  }
+  }, []);
 
-  // Replace the handleDefinitiveEnrichmentComplete function with a corrected version
-  const handleDefinitiveEnrichmentComplete = async (enrichedData: any) => {
+  // Handle definitive enrichment completion
+  const handleDefinitiveEnrichmentComplete = useCallback(async (enrichedData: any) => {
     try {
       // Since there's no fetchHealthSystems function, we'll use the existing setHealthSystems state function
       // to update health systems that were enriched
@@ -891,62 +987,29 @@ export default function Home() {
     } catch (error) {
       console.error('Error handling Definitive enrichment completion:', error);
     }
-  };
+  }, []);
 
-  // Fix the handleAttendeesDelete function
-  const handleAttendeesDelete = async (attendeesToDelete: Attendee[]) => {
-    if (!attendeesToDelete || attendeesToDelete.length === 0) return;
-    
-    const results: Array<{
-      attendee: Attendee;
-      success: boolean;
-      error?: string;
-    }> = [];
-    
-    // Process each attendee sequentially
-    for (const attendee of attendeesToDelete) {
-      try {
-        const { error } = await supabase
-          .from('attendees')
-          .delete()
-          .eq('id', attendee.id);
-         
-        if (error) {
-          console.error(`Error deleting attendee ${attendee.id}:`, error);
-          results.push({
-            attendee,
-            success: false,
-            error: error.message
-          });
-        } else {
-          results.push({
-            attendee,
-            success: true
-          });
-        }
-      } catch (err) {
-        console.error(`Unexpected error deleting attendee ${attendee.id}:`, err);
-        results.push({
-          attendee,
-          success: false,
-          error: err instanceof Error ? err.message : 'An unexpected error occurred'
-        });
+  // Memoize the conference name for ActionBar
+  const conferenceName = useMemo(() => {
+    if (activeListId && lists.find(list => list.id === activeListId)) {
+      return lists.find(list => list.id === activeListId)?.name || '';
+    }
+    return (activeTab === 'conferences' && selectedItem ? (selectedItem as Conference).name : '');
+  }, [activeListId, lists, activeTab, selectedItem]);
+
+  // Add a click outside handler to close all menus
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as HTMLElement
+      // Check if click is outside of any menu button or menu content
+      if (!target.closest('.menu-button') && !target.closest('.menu-content')) {
+        setActiveMenu(null)
       }
     }
-    
-    // Store results and show the dialog
-    setDeleteResults(results);
-    setShowDeleteResults(true);
-    
-    // Update the attendees list by removing successfully deleted attendees
-    const successfullyDeletedIds = results
-      .filter(result => result.success)
-      .map(result => result.attendee.id);
-    
-    setAttendees(prevAttendees => 
-      prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
-    );
-  };
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Render a loading spinner while auth state is being determined
   if (authLoading) {
@@ -983,11 +1046,7 @@ export default function Home() {
         <div className="flex flex-1 overflow-hidden">
           <TabNavigation 
             activeTab={activeTab} 
-            onTabChange={(tab) => {
-              // Reset selectedItem when changing tabs
-              setSelectedItem(null);
-              setActiveTab(tab);
-            }} 
+            onTabChange={handleTabChange}
             counts={{
               attendees: attendees.length,
               'health-systems': healthSystems.length,
@@ -1016,12 +1075,8 @@ export default function Home() {
           onEnrichmentComplete={handleEnrichmentCompleteWrapper}
           onDefinitiveEnrichmentComplete={handleDefinitiveEnrichmentComplete}
           onAIEnrichmentComplete={handleAIEnrichmentComplete}
-          onDelete={handleBulkDelete}
-          conferenceName={
-            activeListId && lists.find(list => list.id === activeListId)
-              ? lists.find(list => list.id === activeListId)?.name
-              : (activeTab === 'conferences' && selectedItem ? (selectedItem as Conference).name : '')
-          }
+          onDelete={handleAttendeesDelete}
+          conferenceName={conferenceName}
           activeListId={activeListId}
           onListDelete={handleListDelete}
           refreshLists={fetchLists}
