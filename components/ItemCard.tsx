@@ -1,11 +1,14 @@
 import { ReactNode } from 'react'
 import { useSelection } from '@/lib/context/SelectionContext'
 import { Checkbox } from '@/components/ui/checkbox'
+import { IconName } from '@/hooks/useColumnManagement'
+import { Icon } from '@/components/Icon'
+import { getIconComponent } from '@/utils/iconUtils'
 
 interface FieldDisplayProps {
   label: string
   value: string
-  icon: ReactNode
+  iconName: IconName
 }
 
 interface ItemCardProps {
@@ -34,9 +37,6 @@ export function ItemCard({
 }: ItemCardProps) {
   const { selectedItems, toggleSelection } = useSelection()
   const isSelected = item ? selectedItems.some(selectedItem => selectedItem.id === item.id) : false
-
-  // Debug fields
-  console.log(`ItemCard for ${title} received fields:`, fields)
 
   const handleClick = (e: React.MouseEvent) => {
     // Prevent card click if clicking the checkbox
@@ -150,7 +150,7 @@ export function ItemCard({
                 <div key={index} className="flex items-start">
                   <div className="flex items-center min-w-[100px] text-gray-500">
                     <div className="w-5 h-5 mr-2">
-                      {field.icon}
+                      <Icon icon={getIconComponent(field.iconName)} size="sm" className="text-gray-400" />
                     </div>
                     <span className="truncate">{field.label}:</span>
                   </div>

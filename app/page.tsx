@@ -108,177 +108,16 @@ export default function Home() {
     setConferences 
   } = useDataFetching()
 
-  // Detect custom columns from data
-  const detectCustomColumns = <T extends Record<string, any>>(data: T[]) => {
-    if (!data || data.length === 0) return [] as ColumnDef<T>[]
-    
-    const customColumns: ColumnDef<T>[] = []
-    const firstItem = data[0]
-    
-    // Get all object keys
-    Object.keys(firstItem).forEach(key => {
-      // Skip standard columns and internal fields
-      const standardKeys = ['id', 'first_name', 'last_name', 'email', 'phone', 'title', 'company', 
-        'name', 'city', 'state', 'website', 'location', 'start_date', 'end_date', 
-        'created_at', 'updated_at', 'definitive_id', 'address', 'zip', 'revenue',
-        'linkedin_url', 'health_systems', 'health_system_id']
-      
-      if (!standardKeys.includes(key) && !key.startsWith('_')) {
-        // This appears to be a custom column
-        customColumns.push({
-          id: key,
-          header: key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          accessorKey: key as keyof T,
-          cell: (info) => {
-            const value = info.getValue()
-            // Format boolean values as Yes/No
-            if (typeof value === 'boolean') {
-              return value ? 'Yes' : 'No'
-            }
-            return value
-          }
-        })
-      }
-    })
-    
-    return customColumns
-  }
-
-  // Enhance column definitions with custom columns
-  const attendeesCustomColumns = useMemo(() => {
-    return detectCustomColumns<Attendee>(attendees)
-  }, [attendees])
-  
-  const healthSystemsCustomColumns = useMemo(() => {
-    return detectCustomColumns<HealthSystem>(healthSystems)
-  }, [healthSystems])
-  
-  const conferencesCustomColumns = useMemo(() => {
-    return detectCustomColumns<Conference>(conferences)
-  }, [conferences])
-
-  // Update the column definitions to include custom columns
-  const attendeeColumns = useMemo<ColumnDef<Attendee>[]>(() => [
-    {
-      id: 'name',
-      header: 'Name',
-      accessorFn: (row) => `${row.first_name} ${row.last_name}`,
-    },
-    { id: 'email', header: 'Email', accessorKey: 'email' },
-    { id: 'phone', header: 'Phone', accessorKey: 'phone' },
-    { id: 'title', header: 'Title', accessorKey: 'title' },
-    { id: 'company', header: 'Company', accessorKey: 'company' },
-    ...attendeesCustomColumns
-  ], [attendeesCustomColumns])
-
-  const healthSystemColumns = useMemo<ColumnDef<HealthSystem>[]>(() => [
-    { id: 'name', header: 'Name', accessorKey: 'name' },
-    { id: 'location', header: 'Location', accessorFn: (row) => `${row.city || ''}, ${row.state || ''}` },
-    { id: 'website', header: 'Website', accessorKey: 'website' },
-    ...healthSystemsCustomColumns
-  ], [healthSystemsCustomColumns])
-
-  const conferenceColumns = useMemo<ColumnDef<Conference>[]>(() => [
-    { id: 'name', header: 'Name', accessorKey: 'name' },
-    { 
-      id: 'date',
-      header: 'Date', 
-      accessorFn: (row) => {
-        if (!row.start_date) return ''
-        const start = new Date(row.start_date).toLocaleDateString()
-        const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null
-        return end ? `${start} - ${end}` : start
-      }
-    },
-    { id: 'location', header: 'Location', accessorKey: 'location' },
-    ...conferencesCustomColumns
-  ], [conferencesCustomColumns])
-
-  // Get all available columns for current tab
-  const getAllColumns = useMemo(() => {
-    switch (activeTab) {
-      case 'attendees':
-        return attendeeColumns.map(col => ({
-          ...col,
-          accessorFn: (row: Attendee | HealthSystem | Conference) => {
-            if ('first_name' in row) {
-              const attendee = row as Attendee
-              if (col.id === 'name') {
-                return `${attendee.first_name} ${attendee.last_name}`
-              }
-              return attendee[col.id as keyof Attendee]
-            }
-            return undefined
-          },
-          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
-            const row = info.row.original
-            if ('first_name' in row) {
-              return typeof col.cell === 'function' ? col.cell(info as CellContext<Attendee, unknown>) : info.getValue()
-            }
-            return null
-          }
-        })) as ColumnDef<Attendee | HealthSystem | Conference>[]
-      case 'health-systems':
-        return healthSystemColumns.map(col => ({
-          ...col,
-          accessorFn: (row: Attendee | HealthSystem | Conference) => {
-            if ('name' in row && !('first_name' in row)) {
-              const healthSystem = row as HealthSystem
-              if (col.id === 'location') {
-                return `${healthSystem.city || ''}, ${healthSystem.state || ''}`
-              }
-              return healthSystem[col.id as keyof HealthSystem]
-            }
-            return undefined
-          },
-          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
-            const row = info.row.original
-            if ('name' in row && !('first_name' in row)) {
-              return typeof col.cell === 'function' ? col.cell(info as CellContext<HealthSystem, unknown>) : info.getValue()
-            }
-            return null
-          }
-        })) as ColumnDef<Attendee | HealthSystem | Conference>[]
-      case 'conferences':
-        return conferenceColumns.map(col => ({
-          ...col,
-          accessorFn: (row: Attendee | HealthSystem | Conference) => {
-            if ('start_date' in row) {
-              const conference = row as Conference
-              if (col.id === 'date') {
-                if (!conference.start_date) return ''
-                const start = new Date(conference.start_date).toLocaleDateString()
-                const end = conference.end_date ? new Date(conference.end_date).toLocaleDateString() : null
-                return end ? `${start} - ${end}` : start
-              }
-              return conference[col.id as keyof Conference]
-            }
-            return undefined
-          },
-          cell: (info: CellContext<Attendee | HealthSystem | Conference, unknown>) => {
-            const row = info.row.original
-            if ('start_date' in row) {
-              return typeof col.cell === 'function' ? col.cell(info as CellContext<Conference, unknown>) : info.getValue()
-            }
-            return null
-          }
-        })) as ColumnDef<Attendee | HealthSystem | Conference>[]
-      default:
-        return []
-    }
-  }, [activeTab, attendeeColumns, healthSystemColumns, conferenceColumns])
-
-  // Use the column management hook
+  // Update the column management hook usage
   const {
     visibleColumns,
-    columnOrder,
-    setColumnOrder,
     handleColumnToggle,
     getVisibleColumns,
+    allColumns,
+    getFieldsForItem
   } = useColumnManagement({
     activeTab,
     view,
-    columns: getAllColumns,
   })
 
   // Use the filtering hook for each data type
@@ -592,86 +431,6 @@ export default function Home() {
   }
 
   const renderCardView = () => {
-    const getColumnIcon = (columnId: string) => {
-      switch (columnId) {
-        case 'name':
-        case 'first_name':
-        case 'last_name':
-          return <Icon icon={UserIcon} size="sm" className="text-gray-400" />
-        case 'email':
-          return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
-        case 'phone':
-          return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />
-        case 'title':
-          return <Icon icon={BriefcaseIcon} size="sm" className="text-gray-400" />
-        case 'company':
-          return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
-        case 'location':
-        case 'address':
-        case 'city':
-        case 'state':
-        case 'zip':
-          return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
-        case 'website':
-        case 'linkedin_url':
-          return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
-        case 'date':
-        case 'start_date':
-        case 'end_date':
-        case 'created_at':
-        case 'updated_at':
-          return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
-        default:
-          // Try to determine icon based on columnId
-          if (columnId.includes('email')) {
-            return <Icon icon={EnvelopeIcon} size="sm" className="text-gray-400" />
-          } else if (columnId.includes('phone')) {
-            return <Icon icon={PhoneIcon} size="sm" className="text-gray-400" />
-          } else if (columnId.includes('date')) {
-            return <Icon icon={CalendarIcon} size="sm" className="text-gray-400" />
-          } else if (columnId.includes('url') || columnId.includes('website')) {
-            return <Icon icon={GlobeAltIcon} size="sm" className="text-gray-400" />
-          } else if (columnId.includes('address') || columnId.includes('location')) {
-            return <Icon icon={MapPinIcon} size="sm" className="text-gray-400" />
-          } else if (columnId.includes('company') || columnId.includes('system')) {
-            return <Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />
-          }
-          return <Icon icon={ViewColumnsIcon} size="sm" className="text-gray-400" />
-      }
-    }
-
-    const getVisibleFields = (item: Attendee | HealthSystem | Conference) => {
-      const fields: { label: string; value: string; icon: React.ReactNode }[] = []
-      const visibleColumnIds = visibleColumns[activeTab]
-      
-      // Use columnOrder to maintain the same order as in table view
-      // If a column is in visibleColumnIds but not in columnOrder, it will be added at the end
-      const orderedVisibleColumns = columnOrder
-        .filter(id => visibleColumnIds.includes(id) && id !== 'name')
-        .concat(visibleColumnIds.filter(id => !columnOrder.includes(id) && id !== 'name'))
-      
-      orderedVisibleColumns.forEach(id => {
-        const column = getAllColumns.find((col) => col.id === id)
-        if (!column) return
-
-        let value = ''
-        if ('accessorKey' in column && column.accessorKey) {
-          const key = column.accessorKey as keyof (Attendee | HealthSystem | Conference)
-          value = String(item[key] || '')
-        } else if ('accessorFn' in column && typeof column.accessorFn === 'function') {
-          value = String(column.accessorFn(item, 0) || '')
-        }
-
-        fields.push({
-          label: String(column.header),
-          value: value,
-          icon: getColumnIcon(String(column.id))
-        })
-      })
-
-      return fields
-    }
-
     if (activeTab === 'attendees') {
       return filteredAttendees.map((attendee) => (
         <ItemCard
@@ -682,7 +441,7 @@ export default function Home() {
           onClick={() => setSelectedItem(attendee)}
           item={attendee}
           itemType="attendee"
-          fields={getVisibleFields(attendee)}
+          fields={getFieldsForItem(attendee)}
         />
       ))
     }
@@ -697,7 +456,7 @@ export default function Home() {
           onClick={() => setSelectedItem(healthSystem)}
           item={healthSystem}
           itemType="healthSystem"
-          fields={getVisibleFields(healthSystem)}
+          fields={getFieldsForItem(healthSystem)}
         />
       ))
     }
@@ -711,7 +470,7 @@ export default function Home() {
         onClick={() => setSelectedItem(conference)}
         item={conference}
         itemType="conference"
-        fields={getVisibleFields(conference)}
+        fields={getFieldsForItem(conference)}
       />
     ))
   }
@@ -853,7 +612,6 @@ export default function Home() {
               activeTab={activeTab}
               visibleColumns={visibleColumns[activeTab]}
               onColumnToggle={handleColumnToggle}
-              onColumnOrderChange={setColumnOrder}
               view={view}
               isOpen={activeMenu === 'properties'}
               onToggle={() => handleMenuToggle('properties')}
@@ -1137,7 +895,7 @@ export default function Home() {
     }
   };
 
-  // Add the missing handleAttendeesDelete function
+  // Fix the handleAttendeesDelete function
   const handleAttendeesDelete = async (attendeesToDelete: Attendee[]) => {
     if (!attendeesToDelete || attendeesToDelete.length === 0) return;
     
@@ -1273,4 +1031,4 @@ export default function Home() {
       </main>
     </SelectionProvider>
   )
-} 
+}
