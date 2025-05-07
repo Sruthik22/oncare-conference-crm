@@ -20,7 +20,6 @@ interface ItemCardProps {
   icon?: ReactNode
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   item?: any // The item being represented by this card
-  itemType?: 'attendee' | 'healthSystem' | 'conference' | 'default'
   fields?: FieldDisplayProps[] // Add support for passing field data directly
 }
 
@@ -31,8 +30,7 @@ export function ItemCard({
   children, 
   onClick, 
   icon, 
-  item, 
-  itemType = 'default',
+  item,
   fields = []
 }: ItemCardProps) {
   const { selectedItems, toggleSelection } = useSelection()
@@ -55,9 +53,6 @@ export function ItemCard({
       toggleSelection(item)
     }
   }
-
-  // Only show subtitle for attendees or when itemType is default
-  const shouldShowSubtitle = subtitle && (itemType === 'attendee');
 
   // Function to format field values based on their content
   const renderFieldValue = (field: FieldDisplayProps) => {
@@ -124,7 +119,7 @@ export function ItemCard({
               {title}
             </h3>
           </div>
-          {shouldShowSubtitle && (
+          {subtitle && (
             <p className="text-sm text-gray-500 mt-1 truncate">
               {subtitle}
             </p>
@@ -144,7 +139,7 @@ export function ItemCard({
           )}
           
           {/* Display fields array if provided */}
-          {fields && fields.length > 0 && (
+          {fields.length > 0 && (
             <div className="mt-3 space-y-2 text-sm text-gray-600 overflow-hidden">
               {fields.map((field, index) => (
                 <div key={index} className="flex items-start">

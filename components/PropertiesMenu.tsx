@@ -1,43 +1,31 @@
 import { useState } from 'react'
 import { Icon } from '@/components/Icon'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
-import { useDatabaseSchema } from '@/hooks/useDatabaseSchema'
 import { getIconComponent } from '@/utils/iconUtils'
 import { getColumnIconName } from '@/hooks/useColumnManagement'
+import type { ColumnDef } from '@tanstack/react-table'
+import type { Attendee, HealthSystem, Conference } from '@/types'
 
 interface PropertiesMenuProps {
-  activeTab: string
   visibleColumns: string[]
   onColumnToggle: (columnId: string) => void
   view: 'table' | 'cards'
   isOpen: boolean
   onToggle: () => void
+  allColumns: ColumnDef<Attendee | HealthSystem | Conference>[]
+  isLoading?: boolean
 }
 
 export function PropertiesMenu({
-  activeTab,
   visibleColumns,
   onColumnToggle,
   view,
   isOpen,
   onToggle,
+  allColumns,
+  isLoading = false
 }: PropertiesMenuProps) {
   const [searchQuery, setSearchQuery] = useState('')
-  const { columns, loading } = useDatabaseSchema()
-
-  // Get columns for the active tab
-  const tabColumns = columns.filter(col => {
-    switch (activeTab) {
-      case 'attendees':
-        return col.table === 'attendees'
-      case 'health-systems':
-        return col.table === 'health_systems'
-      case 'conferences':
-        return col.table === 'conferences'
-      default:
-        return false
-    }
-  })
 
   // Get a rendered icon for a column
   const getColumnIcon = (columnId: string) => {
@@ -47,7 +35,7 @@ export function PropertiesMenu({
   }
 
   // Filter columns based on search query
-  const filteredColumns = tabColumns.filter((column) => {
+  const filteredColumns = allColumns.filter((column) => {
     if (!searchQuery) return true
     const headerStr = String(column.header).toLowerCase()
     return headerStr.includes(searchQuery.toLowerCase())
@@ -65,7 +53,7 @@ export function PropertiesMenu({
       !visibleColumns.includes(String(column.id))
     )
 
-    if (loading) {
+    if (isLoading) {
       return (
         <div className="text-center py-4">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500 mx-auto"></div>

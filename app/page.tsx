@@ -113,11 +113,10 @@ export default function Home() {
     visibleColumns,
     handleColumnToggle,
     getVisibleColumns,
-    allColumns,
-    getFieldsForItem
+    getFieldsForItem,
+    allColumns
   } = useColumnManagement({
-    activeTab,
-    view,
+    activeTab
   })
 
   // Use the filtering hook for each data type
@@ -440,7 +439,6 @@ export default function Home() {
           icon={<Icon icon={UserIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(attendee)}
           item={attendee}
-          itemType="attendee"
           fields={getFieldsForItem(attendee)}
         />
       ))
@@ -455,7 +453,6 @@ export default function Home() {
           icon={<Icon icon={BuildingOfficeIcon} size="sm" className="text-gray-400" />}
           onClick={() => setSelectedItem(healthSystem)}
           item={healthSystem}
-          itemType="healthSystem"
           fields={getFieldsForItem(healthSystem)}
         />
       ))
@@ -469,7 +466,6 @@ export default function Home() {
         icon={<Icon icon={CalendarIcon} size="sm" className="text-gray-400" />}
         onClick={() => setSelectedItem(conference)}
         item={conference}
-        itemType="conference"
         fields={getFieldsForItem(conference)}
       />
     ))
@@ -609,12 +605,13 @@ export default function Home() {
             />
             
             <PropertiesMenu
-              activeTab={activeTab}
               visibleColumns={visibleColumns[activeTab]}
               onColumnToggle={handleColumnToggle}
               view={view}
               isOpen={activeMenu === 'properties'}
               onToggle={() => handleMenuToggle('properties')}
+              allColumns={allColumns}
+              isLoading={isLoading}
             />
             
             <div className="flex items-center gap-4 relative z-40">

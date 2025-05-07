@@ -13,7 +13,6 @@ export type IconName =
 
 interface UseColumnManagementProps {
   activeTab: TabType
-  view: 'table' | 'cards'
 }
 
 // Field format that works with ItemCard
@@ -99,8 +98,7 @@ export const getColumnIconName = (columnId: string): IconName => {
 }
 
 export function useColumnManagement({
-  activeTab,
-  view,
+  activeTab
 }: UseColumnManagementProps): UseColumnManagementResult {
   // Default visible columns
   const defaultVisibleColumns: Record<TabType, string[]> = {
