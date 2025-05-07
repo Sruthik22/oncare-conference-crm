@@ -598,10 +598,11 @@ export default function Home() {
               }
             />
             <FilterMenu
-              activeTab={activeTab}
               onFilterChange={handleFilterChange}
               isOpen={activeMenu === 'filter'}
               onToggle={() => handleMenuToggle('filter')}
+              allColumns={allColumns}
+              isLoading={isLoading}
             />
             
             <PropertiesMenu
