@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRelationships } from '@/hooks/useRelationships';
 import { BuildingOfficeIcon, CalendarIcon, UserIcon, PlusCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
-import type { Attendee, HealthSystem, Conference } from '@/types';
-
 /**
  * Types of relations supported
  */

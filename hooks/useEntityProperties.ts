@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Attendee, HealthSystem, Conference } from '@/types';
 
@@ -198,15 +198,15 @@ export function useEntityProperties(): EntityProperties {
       
       // Process each table's columns
       const attendeeProps = attendeeColumns.map(col => 
-        createPropertyFromColumn(col, foreignKeys, 'attendees')
+        createPropertyFromColumn(col, foreignKeys)
       );
       
       const healthSystemProps = healthSystemColumns.map(col => 
-        createPropertyFromColumn(col, foreignKeys, 'health_systems')
+        createPropertyFromColumn(col, foreignKeys)
       );
       
       const conferenceProps = conferenceColumns.map(col => 
-        createPropertyFromColumn(col, foreignKeys, 'conferences')
+        createPropertyFromColumn(col, foreignKeys)
       );
       
       // Add virtual properties
@@ -306,8 +306,7 @@ export function useEntityProperties(): EntityProperties {
      */
     function createPropertyFromColumn(
       column: ColumnMetadata, 
-      foreignKeys: ForeignKeyMetadata[],
-      tableName: string
+      foreignKeys: ForeignKeyMetadata[]
     ): EntityProperty {
       // Check if column is a foreign key
       const foreignKey = foreignKeys.find(

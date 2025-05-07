@@ -21,13 +21,9 @@ import {
 } from '@heroicons/react/24/outline'
 import { createSwapy } from 'swapy'
 import debounce from 'lodash/debounce'
-import type { ColumnDef } from '@tanstack/react-table'
-import type { Attendee, HealthSystem, Conference } from '@/types'
 import { useDatabaseSchema } from '@/hooks/useDatabaseSchema'
 
 // TODO: drag and drop doesn't work on the columns
-
-type ColumnType = ColumnDef<Attendee | HealthSystem | Conference>
 
 interface PropertiesMenuProps {
   activeTab: string
@@ -67,6 +63,13 @@ export function PropertiesMenu({
         return false
     }
   })
+
+  // Debug tabColumns and visibleColumns to see what's available
+
+  // Enhanced column toggle with debugging
+  const handleColumnToggle = (columnId: string) => {
+    onColumnToggle(columnId)
+  }
 
   // Memoize the debounced search function
   const debouncedSetSearch = debounce((value: string) => {
@@ -247,7 +250,7 @@ export function PropertiesMenu({
                         return;
                       }
                       if (!isNameColumn) {
-                        onColumnToggle(String(column.id));
+                        handleColumnToggle(String(column.id));
                       }
                     }}
                   >
@@ -271,7 +274,7 @@ export function PropertiesMenu({
                       <input
                         type="checkbox"
                         checked={true}
-                        onChange={() => !isNameColumn && onColumnToggle(String(column.id))}
+                        onChange={() => !isNameColumn && handleColumnToggle(String(column.id))}
                         disabled={isNameColumn}
                         className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                       />
@@ -303,7 +306,7 @@ export function PropertiesMenu({
                         if ((e.target as HTMLElement).closest('input[type="checkbox"]')) {
                           return;
                         }
-                        onColumnToggle(String(column.id));
+                        handleColumnToggle(String(column.id));
                       }}
                     >
                       <div className="flex items-center flex-1 min-w-0">
@@ -323,7 +326,7 @@ export function PropertiesMenu({
                         <input
                           type="checkbox"
                           checked={false}
-                          onChange={() => onColumnToggle(String(column.id))}
+                          onChange={() => handleColumnToggle(String(column.id))}
                           className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                         />
                       </div>

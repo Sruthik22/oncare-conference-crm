@@ -35,6 +35,9 @@ export function ItemCard({
   const { selectedItems, toggleSelection } = useSelection()
   const isSelected = item ? selectedItems.some(selectedItem => selectedItem.id === item.id) : false
 
+  // Debug fields
+  console.log(`ItemCard for ${title} received fields:`, fields)
+
   const handleClick = (e: React.MouseEvent) => {
     // Prevent card click if clicking the checkbox
     if ((e.target as HTMLElement).closest('.checkbox-container')) {

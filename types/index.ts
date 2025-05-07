@@ -20,6 +20,13 @@ export interface HealthSystem {
   state?: string
   zip?: string
   created_at: string
+  attendees?: Array<{
+    id: string
+    first_name: string
+    last_name: string
+    title?: string
+    company?: string
+  }>
 }
 
 export interface Conference {

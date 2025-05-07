@@ -1,12 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { Attendee, HealthSystem, Conference, AttendeeConference } from '@/types';
+import type { Attendee, HealthSystem, Conference } from '@/types';
 
 /**
  * Type definitions for relationship operations
  */
-type EntityType = 'attendees' | 'health_systems' | 'conferences';
-type RelationOperation = 'link' | 'unlink';
 
 interface RelationshipHook {
   // Link operations
@@ -252,7 +250,7 @@ export function useRelationships(): RelationshipHook {
   /**
    * Get all available health systems for linking
    */
-  const getAvailableHealthSystems = async (currentHealthSystemId?: string): Promise<HealthSystem[]> => {
+  const getAvailableHealthSystems = async (): Promise<HealthSystem[]> => {
     setIsLoading(true);
     setError(null);
     

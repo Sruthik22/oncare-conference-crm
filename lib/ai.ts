@@ -110,20 +110,14 @@ export async function ensureColumnExists(
   columnName: string, 
   columnType: string
 ): Promise<boolean> {
-  try {
-    console.log(`Checking if column ${columnName} exists in table ${tableName}...`);
-    
+  try {    
     // First check if the column already exists using our SQL function
     const { data: columnExists, error: checkError } = await supabaseAdmin.rpc(
       'column_exists',
       { table_name: tableName, column_name: columnName }
     );
-
-    console.log('Column exists check result:', { columnExists, checkError });
-
     // If the column already exists, return true
     if (columnExists) {
-      console.log(`Column ${columnName} already exists in table ${tableName}.`);
       return true;
     }
 
@@ -147,8 +141,6 @@ export async function ensureColumnExists(
         pgType = 'text';
         break;
     }
-
-    console.log(`Adding column ${columnName} with type ${pgType} to table ${tableName}...`);
     
     // Add the column to the table using our SQL function
     const { error: addError } = await supabaseAdmin.rpc(
@@ -160,14 +152,10 @@ export async function ensureColumnExists(
       }
     );
 
-    console.log('Add column result:', { addError });
-
     if (addError) {
       console.error('Error adding column to table:', addError);
       return false;
     }
-
-    console.log(`Successfully added column ${columnName} to table ${tableName}.`);
     return true;
   } catch (error) {
     console.error('Error ensuring column exists:', error);
