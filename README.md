@@ -27,6 +27,35 @@ A lightweight, AI-native CRM built with Next.js and Supabase.
     ```
 5. Open [http://localhost:3000](http://localhost:3000) in your browser
 
+## Project Structure
+
+The project follows a modular organization:
+
+```
+oncare-crm/
+├── app/                  # Next.js App Router files
+│   ├── api/              # API routes
+│   └── (routes)/         # Page routes
+├── components/           # React components
+│   ├── ui/               # Low-level UI components
+│   ├── features/         # Feature-specific components
+│   │   ├── attendees/    # Attendee-related components
+│   │   ├── conferences/  # Conference-related components
+│   │   ├── health-systems/ # Health system-related components
+│   │   └── common/       # Shared feature components
+│   └── layout/           # Layout components
+├── hooks/                # React hooks
+│   ├── api/              # API-related hooks
+│   ├── features/         # Feature-specific hooks
+│   └── ui/               # UI-related hooks
+├── lib/                  # Utility functions and services
+│   ├── api/              # API-related utilities
+│   ├── context/          # React context providers
+│   └── utils/            # Helper utilities
+├── types/                # TypeScript type definitions
+└── public/               # Static assets
+```
+
 ## Database Schema
 
 The CRM uses the following tables in Supabase:
