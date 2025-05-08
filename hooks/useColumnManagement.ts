@@ -24,6 +24,7 @@ export interface FieldInfo {
   accessorKey?: string             // Direct key to access value
   isForeignKey?: boolean           // Whether this field is a foreign key
   foreignTable?: string            // The referenced table (if a foreign key)
+  dataType?: string                // Data type of the field from database schema
 }
 
 interface UseColumnManagementResult {
@@ -31,7 +32,8 @@ interface UseColumnManagementResult {
   handleColumnToggle: (columnId: string) => void
   getVisibleColumns: () => ColumnDef<Attendee | HealthSystem | Conference>[]
   allColumns: ColumnDef<Attendee | HealthSystem | Conference>[]
-  getFieldsForItem: (item: Attendee | HealthSystem | Conference) => { label: string; value: string; iconName: IconName }[]
+  getFieldsForItem: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
+  getFieldsForAllColumns: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
 // Get the icon name for a column by id - exported for reuse in other components
@@ -198,6 +200,7 @@ export function useColumnManagement({
           label: 'Name',
           iconName: getColumnIconName('name'),
           accessorFn: (row: any) => `${row.first_name} ${row.last_name}`,
+          dataType: 'text'
         });
       } else if (activeTab === 'health-systems' && col.id === 'location') {
         fields.push({
@@ -205,6 +208,7 @@ export function useColumnManagement({
           label: 'Location',
           iconName: getColumnIconName('location'),
           accessorFn: (row: any) => `${row.city || ''}, ${row.state || ''}`,
+          dataType: 'text'
         });
       } else if (activeTab === 'conferences' && col.id === 'date') {
         fields.push({
@@ -217,6 +221,7 @@ export function useColumnManagement({
             const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null;
             return end ? `${start} - ${end}` : start;
           },
+          dataType: 'date'
         });
       } else if (col.is_foreign_key && col.foreign_table) {
         // This is a direct foreign key within the main table (e.g., health_system_id in attendees)
@@ -228,6 +233,7 @@ export function useColumnManagement({
           iconName: getTableIcon(col.foreign_table),
           isForeignKey: true,
           foreignTable: col.foreign_table,
+          dataType: 'text',
           accessorFn: (row: any) => {
             try {
               const foreignKeyValue = row[col.id]; // row within atendee - to get health system id
@@ -236,10 +242,10 @@ export function useColumnManagement({
               // Determine the property name for the related entity
               // It might be in different formats depending on how the data was loaded
               const possibleKeys = [
-                `${col.foreign_table}`, // singular (e.g., health_system)
-                `${col.foreign_table}s`, // plural (e.g., health_systems)
-                col.foreign_table.replace('_', '') // without underscore (e.g., healthsystem)
-              ];
+                col.foreign_table ? `${col.foreign_table}` : '', // singular (e.g., health_system)
+                col.foreign_table ? `${col.foreign_table}s` : '', // plural (e.g., health_systems)
+                col.foreign_table ? col.foreign_table.replace('_', '') : '' // without underscore (e.g., healthsystem)
+              ].filter(Boolean); // Remove empty strings
 
               // NOTE: this accessorFn is called for each row in the original table (i.e. attendees)
               // but we could instead match foreignKeyValue to a row in foreignTable[foreignColumn]
@@ -280,6 +286,7 @@ export function useColumnManagement({
           label: col.header,
           iconName: getColumnIconName(col.id || ''),
           accessorKey: col.id,
+          dataType: col.data_type
         });
       }
     });
@@ -322,6 +329,7 @@ export function useColumnManagement({
               iconName: getTableIcon(col.foreign_table),
               isForeignKey: true,
               foreignTable: col.foreign_table,
+              dataType: 'text',
               accessorFn: (row: any) => {
                 // again same approach to do the accessorFn - row of foreigntable[foreignColumn] = row[id]
                 // selected row[default value]
@@ -413,6 +421,7 @@ export function useColumnManagement({
           id: `reverse_${otherTable}`,
           label: otherEntityName,
           iconName: getTableIcon(otherTable),
+          dataType: 'text',
           accessorFn: (row: any) => {
             try {
               // For reverse relationships, we access the array of related entities directly
@@ -470,7 +479,8 @@ export function useColumnManagement({
       accessorFn: field.accessorFn,
       meta: {
         isForeignKey: field.isForeignKey,
-        foreignTable: field.foreignTable
+        foreignTable: field.foreignTable,
+        dataType: field.dataType
       }
     }));
   };
@@ -498,7 +508,7 @@ export function useColumnManagement({
   
   // Get field data for an item to display in ItemCard
   const getFieldsForItem = (item: Attendee | HealthSystem | Conference) => {
-    const fields: { label: string; value: string; iconName: IconName }[] = []
+    const fields: { id: string, label: string, value: string, iconName: IconName }[] = []
     const visibleColumnIds = visibleColumns[activeTab]
     
     // Skip name as it's shown as the card title
@@ -520,6 +530,30 @@ export function useColumnManagement({
       }
       
       fields.push({
+        id: field.id,
+        label: field.label,
+        value,
+        iconName: field.iconName
+      });
+    });
+    
+    return fields;
+  }
+
+  const getFieldsForAllColumns = (item: Attendee | HealthSystem | Conference) => {
+    const fields: { id: string, label: string, value: string, iconName: IconName }[] = []
+    
+    fieldsInfo.forEach(field => {
+      let value = '';
+      
+      if (field.accessorFn) {
+        value = String(field.accessorFn(item) || '');
+      } else if (field.accessorKey) {
+        value = String((item as any)[field.accessorKey] || '');
+      }
+      
+      fields.push({
+        id: field.id,
         label: field.label,
         value,
         iconName: field.iconName
@@ -534,6 +568,7 @@ export function useColumnManagement({
     handleColumnToggle,
     getVisibleColumns,
     allColumns,
-    getFieldsForItem
+    getFieldsForItem,
+    getFieldsForAllColumns
   }
 } 

@@ -97,7 +97,7 @@ export function useDatabaseSchema() {
             id: 'date',
             header: 'Date',
             table: 'conferences',
-            data_type: 'text',
+            data_type: 'date',
             is_nullable: true,
             is_foreign_key: false
           },

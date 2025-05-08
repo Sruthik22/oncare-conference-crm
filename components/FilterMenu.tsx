@@ -10,6 +10,13 @@ import { getColumnIconName } from '@/hooks/useColumnManagement'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 
+// Define the column meta data interface to match what we expect
+interface ColumnMeta {
+  isForeignKey?: boolean
+  foreignTable?: string
+  dataType?: string
+}
+
 type FilterOperator = 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
 
 interface Filter {
@@ -25,11 +32,19 @@ interface FilterMenuProps {
   onToggle: () => void
   allColumns: ColumnDef<Attendee | HealthSystem | Conference>[]
   isLoading?: boolean
+  activeFilters?: Filter[]
 }
 
-export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoading = false }: FilterMenuProps) {
+export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoading = false, activeFilters = [] }: FilterMenuProps) {
   const [filters, setFilters] = useState<Filter[]>([])
   const [activeFilter, setActiveFilter] = useState<Filter | null>(null)
+
+  // Synchronize the local state with parent's activeFilters
+  useEffect(() => {
+    if (isOpen && activeFilters) {
+      setFilters(activeFilters)
+    }
+  }, [isOpen, activeFilters])
 
   const addFilter = () => {
     if (allColumns.length === 0) return
@@ -42,6 +57,7 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
     }
     setFilters([...filters, newFilter])
     setActiveFilter(newFilter)
+    onFilterChange([...filters, newFilter])
   }
 
   const removeFilter = (id: string) => {
@@ -62,8 +78,12 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
     const column = allColumns.find(c => String(c.id) === property)
     if (!column) return []
 
-    // Check if column might be a date field based on name
-    if (property.includes('date') || property.includes('time') || property === 'created_at' || property === 'updated_at') {
+    // Get data type from column metadata
+    const meta = column.meta as ColumnMeta | undefined
+    const dataType = meta?.dataType
+    
+    // Date operators - based on data type or column name
+    if (dataType === 'date' || dataType === 'timestamp' || dataType?.includes('time')) {
       return [
         { value: 'equals', label: 'Equals' },
         { value: 'greater_than', label: 'After' },
@@ -73,9 +93,8 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
       ]
     }
 
-    // Check if column might be numeric based on name
-    if (property.includes('id') || property.includes('count') || property.includes('revenue') || 
-        property.includes('price') || property.includes('amount')) {
+    // Numeric operators - based on data type or column name
+    if (dataType === 'integer' || dataType === 'numeric' || dataType === 'real' || dataType === 'double precision') {
       return [
         { value: 'equals', label: 'Equals' },
         { value: 'greater_than', label: 'Greater than' },
@@ -85,7 +104,26 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
       ]
     }
 
-    // Default to text operators for other fields
+    // Boolean operators
+    if (dataType === 'boolean') {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'is_empty', label: 'Is empty' },
+        { value: 'is_not_empty', label: 'Is not empty' },
+      ]
+    }
+
+    // Array operators (for comma-separated values)
+    if (dataType?.includes('array')) {
+      return [
+        { value: 'contains', label: 'Contains' },
+        { value: 'equals', label: 'Equals' },
+        { value: 'is_empty', label: 'Is empty' },
+        { value: 'is_not_empty', label: 'Is not empty' },
+      ]
+    }
+
+    // Default to text operators for other fields/string types
     return [
       { value: 'equals', label: 'Equals' },
       { value: 'contains', label: 'Contains' },
@@ -202,13 +240,80 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
                       </div>
 
                       {!['is_empty', 'is_not_empty'].includes(filter.operator) && (
-                        <input
-                          type="text"
-                          value={filter.value}
-                          onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
-                          placeholder="Value"
-                          className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
-                        />
+                        <div>
+                          {(() => {
+                            const column = allColumns.find(c => String(c.id) === filter.property);
+                            const meta = column?.meta as ColumnMeta | undefined;
+                            const dataType = meta?.dataType;
+                            
+                            // Date input for date fields
+                            if (dataType === 'date' || dataType === 'timestamp' || dataType?.includes('time') ||
+                                filter.property.includes('date') || filter.property.includes('time') || 
+                                filter.property === 'created_at' || filter.property === 'updated_at') {
+                              
+                              // Use datetime-local for timestamp fields
+                              if (dataType === 'timestamp' || dataType?.includes('time')) {
+                                return (
+                                  <input
+                                    type="datetime-local"
+                                    value={filter.value}
+                                    onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                    className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                                  />
+                                );
+                              }
+                              
+                              // Use date for date-only fields
+                              return (
+                                <input
+                                  type="date"
+                                  value={filter.value}
+                                  onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                  className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                                />
+                              );
+                            }
+                            
+                            // Number input for numeric fields
+                            if (dataType === 'integer' || dataType === 'numeric' || dataType === 'real' || dataType === 'double precision' ||
+                                filter.property.includes('count') || filter.property.includes('revenue') || 
+                                filter.property.includes('price') || filter.property.includes('amount')) {
+                              return (
+                                <input
+                                  type="number"
+                                  value={filter.value}
+                                  onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                  className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                                />
+                              );
+                            }
+                            
+                            // Boolean select for boolean fields
+                            if (dataType === 'boolean') {
+                              return (
+                                <select
+                                  value={filter.value}
+                                  onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                  className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                                >
+                                  <option value="true">True</option>
+                                  <option value="false">False</option>
+                                </select>
+                              );
+                            }
+                            
+                            // Default text input for other fields
+                            return (
+                              <input
+                                type="text"
+                                value={filter.value}
+                                onChange={(e) => updateFilter(filter.id, { value: e.target.value })}
+                                placeholder="Value"
+                                className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
+                              />
+                            );
+                          })()}
+                        </div>
                       )}
                     </div>
                   </div>

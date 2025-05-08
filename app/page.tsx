@@ -245,6 +245,7 @@ export default function Home() {
     handleColumnToggle,
     getVisibleColumns,
     getFieldsForItem,
+    getFieldsForAllColumns,
     allColumns
   } = useColumnManagement({
     activeTab
@@ -255,18 +256,21 @@ export default function Home() {
     data: activeListId ? listFilteredAttendees : attendees,
     searchTerm,
     activeFilters,
+    getFieldsForAllColumns,
   })
 
   const filteredHealthSystems = useFiltering({
     data: healthSystems,
     searchTerm,
     activeFilters,
+    getFieldsForAllColumns,
   })
 
   const filteredConferences = useFiltering({
     data: conferences,
     searchTerm,
     activeFilters,
+    getFieldsForAllColumns,
   })
 
   // Memoize current items based on active tab to prevent unnecessary recalculations
@@ -506,8 +510,10 @@ export default function Home() {
   }, []);
 
   // Memoize handleAttendeesDelete function
-  const handleAttendeesDelete = useCallback(async (attendeesToDelete: Attendee[]) => {
-    if (!attendeesToDelete || attendeesToDelete.length === 0) return;
+  const handleAttendeesDelete = useCallback(async (attendeesToDelete: (Attendee | HealthSystem | Conference)[]) => {
+    const filteredAttendees = attendeesToDelete.filter((item): item is Attendee => 'first_name' in item && 'last_name' in item);
+    
+    if (!filteredAttendees || filteredAttendees.length === 0) return;
     
     const results: Array<{
       attendee: Attendee;
@@ -516,7 +522,7 @@ export default function Home() {
     }> = [];
     
     // Process each attendee sequentially
-    for (const attendee of attendeesToDelete) {
+    for (const attendee of filteredAttendees) {
       try {
         const { error } = await supabase
           .from('attendees')
@@ -744,6 +750,7 @@ export default function Home() {
               onToggle={() => handleMenuToggle('filter')}
               allColumns={allColumns}
               isLoading={isLoading}
+              activeFilters={activeFilters}
             />
             
             <PropertiesMenu
