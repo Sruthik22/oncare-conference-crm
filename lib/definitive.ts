@@ -27,6 +27,7 @@ export interface DefinitiveHospital {
   EMRVendorAmbulatory?: string;
   EMRVendorInpatient?: string;
   DHCProfile?: string;
+  NumHospitals?: number;
 }
 
 export interface DefinitiveSearchParams {
@@ -43,6 +44,10 @@ export interface DefinitiveEnrichmentResult {
     city?: string;
     state?: string;
     zip?: string;
+    ambulatory_ehr?: string;
+    net_patient_revenue?: number;
+    number_of_beds?: number;
+    number_of_hospitals_in_network?: number;
   };
   success: boolean;
   error?: string;
@@ -144,6 +149,8 @@ export class DefinitiveService {
         if (searchResult.value && searchResult.value.length > 0) {
           // Found a match, get the first result
           const match = searchResult.value[0];
+
+          console.log('match', match);
           
           // Return enriched health system data
           results.push({
@@ -155,7 +162,11 @@ export class DefinitiveService {
               address: match.Address,
               city: match.HQCity,
               state: match.State,
-              zip: match.Zip
+              zip: match.Zip,
+              ambulatory_ehr: match.EMRVendorAmbulatory,
+              net_patient_revenue: match.NetPatientRev,
+              number_of_beds: match.NumBeds,
+              number_of_hospitals_in_network: match.NumHospitals
             },
             success: true
           });

@@ -122,7 +122,7 @@ export async function ensureColumnExists(
     // First check if the column already exists using our SQL function
     const { data: columnExists, error: checkError } = await supabaseAdmin.rpc(
       'column_exists',
-      { table_name: tableName, column_name: columnName }
+      { in_column_name: columnName, in_table_name: tableName }
     );
     // If the column already exists, return true
     if (columnExists) {

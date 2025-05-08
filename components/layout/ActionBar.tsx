@@ -310,13 +310,35 @@ export function ActionBar({
       const successfullyEnriched = enrichedData.filter(result => result.success)
       
       if (successfullyEnriched.length > 0 && onDefinitiveEnrichmentComplete) {
+        console.log('successfullyEnriched', successfullyEnriched);
         try {
+          // Define the required columns with their types
+          const requiredColumns = [
+            { name: 'ambulatory_ehr', type: 'text' },
+            { name: 'net_patient_revenue', type: 'number' },
+            { name: 'number_of_beds', type: 'number' },
+            { name: 'state', type: 'text' },
+            { name: 'number_of_hospitals_in_network', type: 'number' }
+          ];
+          
+          // Ensure all required columns exist before updating data
+          for (const column of requiredColumns) {
+            const columnCreated = await ensureColumnExists('health_systems', column.name, column.type);
+            console.log(`Column creation for health_systems.${column.name} ${columnCreated ? 'succeeded' : 'failed'}`);
+            if (!columnCreated) {
+              console.error(`Failed to create column ${column.name} in health_systems table`);
+              // Continue anyway, as we want to update other columns even if one fails
+            }
+          }
+          
           // For each successfully enriched health system, update it in the database
           for (const result of successfullyEnriched) {
             const { healthSystem } = result
+
+            console.log('healthSystem', healthSystem);
             
-            // Update the health system in Supabase
-            await supabase
+            // Update the health system in Supabase with all the fields
+            const { error } = await supabase
               .from('health_systems')
               .update({
                 definitive_id: healthSystem.definitive_id,
@@ -324,9 +346,17 @@ export function ActionBar({
                 address: healthSystem.address,
                 city: healthSystem.city,
                 state: healthSystem.state,
-                zip: healthSystem.zip
+                zip: healthSystem.zip,
+                ambulatory_ehr: healthSystem.ambulatory_ehr,
+                net_patient_revenue: healthSystem.net_patient_revenue,
+                number_of_beds: healthSystem.number_of_beds,
+                number_of_hospitals_in_network: healthSystem.number_of_hospitals_in_network
               })
               .eq('id', healthSystem.id)
+              
+            if (error) {
+              console.error(`Error updating health system ${healthSystem.id}:`, error);
+            }
           }
           
           // Call the completion handler
