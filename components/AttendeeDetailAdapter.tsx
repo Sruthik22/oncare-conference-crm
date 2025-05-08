@@ -275,6 +275,7 @@ export const AttendeeDetailAdapter = ({
       getAvailableItems: getAvailableConferences,
       itemLabelKey: 'name'
     },
+    // Certifications tags
     {
       key: 'certifications',
       getItems: (entity: EntityTypes) => {
@@ -292,7 +293,53 @@ export const AttendeeDetailAdapter = ({
       },
       icon: AcademicCapIcon,
       labelKey: 'Certifications',
-      itemLabelKey: 'name'
+      itemLabelKey: 'name',
+      // Add removable capability
+      removable: true,
+      // Implement onRemove for certifications
+      onRemove: async (item: { name: string }, entity: EntityTypes) => {
+        const attendee = entity as Attendee;
+        
+        // Filter out the certification to remove
+        const updatedCertifications = (attendee.certifications || []).filter(cert => cert !== item.name);
+        
+        // Update the attendee's certifications in the database
+        const { error } = await supabase
+          .from('attendees')
+          .update({ certifications: updatedCertifications })
+          .eq('id', attendee.id);
+        
+        if (error) throw error;
+        
+        return Promise.resolve();
+      },
+      // Add capability to add new certifications
+      addable: true,
+      onAdd: async (entity: EntityTypes, item: any) => {
+        const attendee = entity as Attendee;
+        
+        // Add the new certification to the list
+        const currentCertifications = attendee.certifications || [];
+        
+        // Check if certification already exists (case insensitive)
+        if (currentCertifications.some(cert => cert.toLowerCase() === item.name.toLowerCase())) {
+          throw new Error('This certification already exists');
+        }
+        
+        const updatedCertifications = [...currentCertifications, item.name];
+        
+        // Update the attendee's certifications in the database
+        const { error } = await supabase
+          .from('attendees')
+          .update({ certifications: updatedCertifications })
+          .eq('id', attendee.id);
+        
+        if (error) throw error;
+        
+        return Promise.resolve();
+      },
+      // Return empty array for available items since we'll create them on the fly
+      getAvailableItems: () => Promise.resolve([])
     }
   ];
 

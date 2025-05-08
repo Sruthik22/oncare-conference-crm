@@ -1,7 +1,6 @@
 import { useState, Fragment } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { supabase } from '@/lib/supabase'
 import { AttendeeDetailAdapter } from './AttendeeDetailAdapter'
 import { ConferenceDetailAdapter } from './ConferenceDetailAdapter'
 import { HealthSystemDetailAdapter } from './HealthSystemDetailAdapter'
@@ -93,84 +92,11 @@ export const AddEntityButton = ({
     setIsOpen(false)
   }
 
-  // Handle creating the new entity
-  const handleEntityCreate = async (entity: (Attendee | Conference | HealthSystem) & { _isNew?: boolean }) => {
-    try {
-      setError(null)
-      
-      // Filter the entity to only include fields that are in the database schema
-      let entityToSave: Record<string, any> = {};
-      
-      if ('first_name' in entity) {
-        // Attendee fields
-        const attendee = entity as Attendee;
-        entityToSave = {
-          first_name: attendee.first_name,
-          last_name: attendee.last_name,
-          title: attendee.title,
-          company: attendee.company,
-          email: attendee.email,
-          phone: attendee.phone,
-          linkedin_url: attendee.linkedin_url,
-          notes: attendee.notes,
-          certifications: attendee.certifications || []
-        };
-      } else if ('start_date' in entity) {
-        // Conference fields
-        const conference = entity as Conference;
-        entityToSave = {
-          name: conference.name,
-          start_date: conference.start_date,
-          end_date: conference.end_date,
-          location: conference.location
-        };
-      } else {
-        // Health System fields
-        const healthSystem = entity as HealthSystem;
-        entityToSave = {
-          name: healthSystem.name,
-          definitive_id: healthSystem.definitive_id,
-          website: healthSystem.website,
-          address: healthSystem.address,
-          city: healthSystem.city,
-          state: healthSystem.state,
-          zip: healthSystem.zip
-        };
-      }
-      
-      // Get the correct table name
-      const tableName = entityType === 'health-systems' 
-        ? 'health_systems' 
-        : entityType
-      
-      console.log(`Creating new ${entityType} with data:`, entityToSave);
-      
-      // Insert the entity
-      const { data, error } = await supabase
-        .from(tableName)
-        .insert(entityToSave)
-        .select()
-      
-      if (error) {
-        throw error
-      }
-      
-      if (!data || data.length === 0) {
-        throw new Error('No data returned after insert')
-      }
-      
-      console.log(`New ${entityType.slice(0, -1)} created:`, data[0])
-      
-      // Close the dialog and notify parent
-      setIsOpen(false)
-      onEntityAdded(data[0])
-
-      return data[0]
-    } catch (err) {
-      console.error('Error creating entity:', err)
-      setError(err instanceof Error ? err.message : 'An error occurred while creating entity')
-      return null
-    }
+  // Handle entity creation update
+  const handleEntityUpdate = (entity: Attendee | Conference | HealthSystem) => {
+    // Close the dialog and notify parent
+    setIsOpen(false)
+    onEntityAdded(entity)
   }
 
   // Create a DeleteButton that does nothing since we're creating a new entity
@@ -187,7 +113,7 @@ export const AddEntityButton = ({
         return (
           <AttendeeDetailAdapter
             attendee={emptyEntity as Attendee}
-            onUpdate={handleEntityCreate as (updatedAttendee: Attendee) => void}
+            onUpdate={handleEntityUpdate as (updatedAttendee: Attendee) => void}
             onDelete={handleDelete}
             conferenceName={currentConferenceName}
             isNewEntity={true}
@@ -197,7 +123,7 @@ export const AddEntityButton = ({
         return (
           <ConferenceDetailAdapter
             conference={emptyEntity as Conference}
-            onUpdate={handleEntityCreate as (updatedConference: Conference) => void}
+            onUpdate={handleEntityUpdate as (updatedConference: Conference) => void}
             onDelete={handleDelete}
             isNewEntity={true}
           />
@@ -206,7 +132,7 @@ export const AddEntityButton = ({
         return (
           <HealthSystemDetailAdapter
             healthSystem={emptyEntity as HealthSystem}
-            onUpdate={handleEntityCreate as (updatedHealthSystem: HealthSystem) => void}
+            onUpdate={handleEntityUpdate as (updatedHealthSystem: HealthSystem) => void}
             onDelete={handleDelete}
             isNewEntity={true}
           />

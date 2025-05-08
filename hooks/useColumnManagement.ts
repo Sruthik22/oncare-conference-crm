@@ -216,10 +216,7 @@ export function useColumnManagement({
           label: 'Date',
           iconName: getColumnIconName('date'),
           accessorFn: (row: any) => {
-            if (!row.start_date) return '';
-            const start = new Date(row.start_date).toLocaleDateString();
-            const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null;
-            return end ? `${start} - ${end}` : start;
+            return `${row.start_date} - ${row.end_date}`;
           },
           dataType: 'date'
         });

@@ -146,12 +146,18 @@ export const EntityDetail = ({
     setIsAddingTag(tagKey);
     setShowTagSelection(true);
     
-    // Skip API calls for new entities that aren't in the database yet
-    if (isNewEntity) {
+    // Skip API calls for new entities that aren't in the database yet,
+    // unless it's a certification which can be added directly
+    if (isNewEntity && tagKey !== 'certifications') {
       setAvailableTagItems(prev => ({
         ...prev,
         [tagKey]: []
       }));
+      return;
+    }
+    
+    // For certifications, we don't need to fetch available items
+    if (tagKey === 'certifications') {
       return;
     }
     
@@ -182,28 +188,77 @@ export const EntityDetail = ({
 
   // Handle confirming tag addition
   const handleTagAddConfirm = async () => {
-    if (!isAddingTag || !selectedTagItem) return;
+    if (!isAddingTag) return;
     
     const tagDef = tags.find(t => t.key === isAddingTag);
     if (!tagDef || !tagDef.onAdd) return;
     
-    // // Skip API calls for new entities that aren't in the database yet
-    // if (isNewEntity) {
-    //   console.log('Cannot add relationship on a new entity that has not been saved');
-    //   setError('Please save the entity first before adding relationships');
-    //   setIsTagActionInProgress(false);
-    //   return;
-    // }
+    // For certifications, make sure we have a name to add
+    if (isAddingTag === 'certifications' && (!selectedTagItem || !selectedTagItem.name)) {
+      setError('Please enter a certification name');
+      return;
+    }
     
     setIsTagActionInProgress(true);
     setError(null);
     
     try {
-      // Call the onAdd function provided by the tag definition
+      // For new entities, just store the relationships in the local state
+      // They will be saved when the entity is saved
+      if (isNewEntity) {
+        if (entityType === 'attendee') {
+          // For health systems, just store the ID
+          if (isAddingTag === 'health_system') {
+            setEditData(prev => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                health_system_id: selectedTagItem.id
+              };
+            });
+            console.log(`Added health system ${selectedTagItem.name} to new attendee`);
+          }
+          // For certifications, add to the array directly
+          else if (isAddingTag === 'certifications') {
+            setEditData(prev => {
+              if (!prev) return null;
+              // Ensure we're working with an attendee
+              if (entityType !== 'attendee') return prev;
+              
+              const attendeeData = prev as Attendee;
+              const currentCerts = attendeeData.certifications || [];
+              // Check for duplicates
+              if (currentCerts.some(cert => cert.toLowerCase() === selectedTagItem.name.toLowerCase())) {
+                setError('This certification already exists');
+                return prev;
+              }
+              return {
+                ...prev,
+                certifications: [...currentCerts, selectedTagItem.name]
+              };
+            });
+            console.log(`Added certification ${selectedTagItem.name} to new attendee`);
+          }
+          // For conferences, we can't create the relationship yet since the attendee doesn't exist
+          // We'll handle this after the attendee is created
+          else if (isAddingTag === 'conferences') {
+            console.log(`Conference ${selectedTagItem.name} selected, will be linked after saving attendee`);
+          }
+        }
+        
+        // Close the dialog
+        setShowTagSelection(false);
+        setSelectedTagItem(null);
+        setIsAddingTag(null);
+        setIsTagActionInProgress(false);
+        return;
+      }
+      
+      // For existing entities, call the onAdd function provided by the tag definition
       await tagDef.onAdd(entity, selectedTagItem);
       
-      // Refresh available items
-      if (tagDef.getAvailableItems) {
+      // If it's not certifications, refresh available items
+      if (isAddingTag !== 'certifications' && tagDef.getAvailableItems) {
         const items = await tagDef.getAvailableItems(entity);
         setAvailableTagItems(prev => ({
           ...prev,
@@ -460,6 +515,15 @@ export const EntityDetail = ({
       // Create a copy of editData to handle special cases
       const updateData = { ...editData }
       
+      // Handle certifications for new attendees
+      if (entityType === 'attendee' && isNewEntity) {
+        // Ensure certifications is initialized as an array
+        const attendeeData = updateData as Attendee;
+        if (!attendeeData.certifications) {
+          attendeeData.certifications = [];
+        }
+      }
+      
       // Remove relationship fields that shouldn't be sent to the database
       if (entityType === 'attendee') {
         delete (updateData as any).attendee_conferences
@@ -473,26 +537,58 @@ export const EntityDetail = ({
         delete (updateData as any).attendees
       }
       
-      const { data, error: updateError } = await supabase
-        .from(tableName)
-        .update(updateData)
-        .eq('id', editData.id)
-        .select()
+      // Remove client-side-only properties like _isNew
+      delete (updateData as any)._isNew
       
-      if (updateError) {
-        console.error('Supabase update error:', updateError)
-        throw updateError
-      }
+      // For debugging
+      console.log('Saving entity data:', updateData)
       
-      if (!data || data.length === 0) {
-        throw new Error('No data returned after update')
-      }
-      
-      setIsEditing(false)
-      
-      // If update was successful and there's an onUpdate callback, call it
-      if (data.length > 0 && onUpdate) {
-        onUpdate(data[0])
+      // Check if this is a new entity or update to an existing one
+      if (isNewEntity) {
+        // This is a new entity, so we should INSERT instead of UPDATE
+        const { data, error: insertError } = await supabase
+          .from(tableName)
+          .insert(updateData)
+          .select()
+        
+        if (insertError) {
+          console.error('Supabase insert error:', insertError)
+          throw insertError
+        }
+        
+        if (!data || data.length === 0) {
+          throw new Error('No data returned after insert')
+        }
+        
+        setIsEditing(false)
+        
+        // If insert was successful and there's an onUpdate callback, call it
+        if (data.length > 0 && onUpdate) {
+          onUpdate(data[0])
+        }
+      } else {
+        // This is an existing entity, so we UPDATE
+        const { data, error: updateError } = await supabase
+          .from(tableName)
+          .update(updateData)
+          .eq('id', editData.id)
+          .select()
+        
+        if (updateError) {
+          console.error('Supabase update error:', updateError)
+          throw updateError
+        }
+        
+        if (!data || data.length === 0) {
+          throw new Error('No data returned after update')
+        }
+        
+        setIsEditing(false)
+        
+        // If update was successful and there's an onUpdate callback, call it
+        if (data.length > 0 && onUpdate) {
+          onUpdate(data[0])
+        }
       }
     } catch (err) {
       console.error('Full error object:', err)
@@ -662,6 +758,94 @@ export const EntityDetail = ({
     if (!tagDef) return null;
     
     const items = availableTagItems[tagDef.key] || [];
+    const isCertification = tagDef.key === 'certifications';
+    const [newCertificationName, setNewCertificationName] = useState('');
+    
+    // Handle certification input change
+    const handleCertificationInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setNewCertificationName(e.target.value);
+    };
+    
+    // Handle adding a new certification
+    const handleAddNewCertification = () => {
+      if (isCertification && newCertificationName.trim()) {
+        // For certifications, set the item and immediately process it
+        const certName = newCertificationName.trim();
+        
+        // Set loading state
+        setIsTagActionInProgress(true);
+        setError(null);
+        
+        try {
+          // For new entities
+          if (isNewEntity && entityType === 'attendee') {
+            setEditData(prev => {
+              if (!prev) return null;
+              
+              const attendeeData = prev as Attendee;
+              const currentCerts = attendeeData.certifications || [];
+              
+              // Check for duplicates
+              if (currentCerts.some(cert => cert.toLowerCase() === certName.toLowerCase())) {
+                setError('This certification already exists');
+                return prev;
+              }
+              
+              // Add to certifications array
+              return {
+                ...prev,
+                certifications: [...currentCerts, certName]
+              };
+            });
+            
+            // Close dialog
+            setShowTagSelection(false);
+            setNewCertificationName('');
+            setIsAddingTag(null);
+            setIsTagActionInProgress(false);
+          }
+          // For existing entities
+          else {
+            const tagDef = tags.find(t => t.key === 'certifications');
+            if (tagDef && tagDef.onAdd) {
+              // Add certification directly
+              tagDef.onAdd(entity, { name: certName })
+                .then(() => {
+                  // If update was successful and there's an onUpdate callback, refetch the entity
+                  if (onUpdate && fetchWithRelationships) {
+                    return fetchWithRelationships(entity.id);
+                  }
+                  return { data: null, error: null };
+                })
+                .then(result => {
+                  if (result.data && onUpdate) {
+                    onUpdate(result.data);
+                  }
+                  
+                  // Close dialog
+                  setShowTagSelection(false);
+                  setNewCertificationName('');
+                  setIsAddingTag(null);
+                  setIsTagActionInProgress(false);
+                })
+                .catch(err => {
+                  setError(err instanceof Error ? err.message : 'An error occurred');
+                  setIsTagActionInProgress(false);
+                });
+            } else {
+              setError('Unable to add certification');
+              setIsTagActionInProgress(false);
+            }
+          }
+        } catch (error) {
+          setError(error instanceof Error ? error.message : 'An error occurred');
+          setIsTagActionInProgress(false);
+        }
+      } else {
+        // For other tag types, just confirm the selected item
+        handleTagAddConfirm();
+      }
+    };
     
     return (
       <Transition.Root show={showTagSelection} as={Fragment}>
@@ -700,56 +884,75 @@ export const EntityDetail = ({
                       </Dialog.Title>
                       <div className="mt-2">
                         <p className="text-sm text-gray-500">
-                          Select a {tagDef.labelKey.toLowerCase()} to add to {title(entity)}
+                          {isCertification 
+                            ? 'Enter a new certification to add'
+                            : `Select a ${tagDef.labelKey.toLowerCase()} to add to ${title(entity)}`
+                          }
                         </p>
                       </div>
                     </div>
                   </div>
                   
-                  <div className="mt-4 max-h-60 overflow-y-auto">
-                    <ul className="divide-y divide-gray-200">
-                      {items.length > 0 ? (
-                        items.map((item, index) => (
-                          <li 
-                            key={index} 
-                            className={`flex items-center px-4 py-3 cursor-pointer ${
-                              selectedTagItem === item 
-                                ? 'bg-blue-50 hover:bg-blue-100' 
-                                : 'hover:bg-gray-50'
-                            }`}
-                            onClick={() => handleTagItemSelect(item)}
-                          >
-                            <div className="flex-shrink-0">
-                              <div className={`h-8 w-8 rounded-full ${tagDef.getColor(index)} flex items-center justify-center`}>
-                                <tagDef.icon className="h-4 w-4" />
+                  {isCertification ? (
+                    <div className="mt-4">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder="Enter certification name"
+                          value={newCertificationName}
+                          onChange={handleCertificationInputChange}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 max-h-60 overflow-y-auto">
+                      <ul className="divide-y divide-gray-200">
+                        {items.length > 0 ? (
+                          items.map((item, index) => (
+                            <li 
+                              key={index} 
+                              className={`flex items-center px-4 py-3 cursor-pointer ${
+                                selectedTagItem === item 
+                                  ? 'bg-blue-50 hover:bg-blue-100' 
+                                  : 'hover:bg-gray-50'
+                              }`}
+                              onClick={() => handleTagItemSelect(item)}
+                            >
+                              <div className="flex-shrink-0">
+                                <div className={`h-8 w-8 rounded-full ${tagDef.getColor(index)} flex items-center justify-center`}>
+                                  <tagDef.icon className="h-4 w-4" />
+                                </div>
                               </div>
-                            </div>
-                            <div className="ml-3">
-                              <p className="text-sm font-medium text-gray-900">
-                                {tagDef.getItemDisplayLabel 
-                                  ? tagDef.getItemDisplayLabel(item) 
-                                  : tagDef.itemLabelKey 
-                                    ? item[tagDef.itemLabelKey] 
-                                    : tagDef.getLabel(item)
-                                }
-                              </p>
-                            </div>
+                              <div className="ml-3">
+                                <p className="text-sm font-medium text-gray-900">
+                                  {tagDef.getItemDisplayLabel 
+                                    ? tagDef.getItemDisplayLabel(item) 
+                                    : tagDef.itemLabelKey 
+                                      ? item[tagDef.itemLabelKey] 
+                                      : tagDef.getLabel(item)
+                                  }
+                                </p>
+                              </div>
+                            </li>
+                          ))
+                        ) : (
+                          <li className="px-4 py-3 text-sm text-gray-500 text-center">
+                            No available {tagDef.labelKey.toLowerCase()} found
                           </li>
-                        ))
-                      ) : (
-                        <li className="px-4 py-3 text-sm text-gray-500 text-center">
-                          No available {tagDef.labelKey.toLowerCase()} found
-                        </li>
-                      )}
-                    </ul>
-                  </div>
+                        )}
+                      </ul>
+                    </div>
+                  )}
                   
                   <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
                     <button
                       type="button"
                       className="inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:col-start-2"
-                      onClick={handleTagAddConfirm}
-                      disabled={isTagActionInProgress || !selectedTagItem}
+                      onClick={() => {
+                        handleAddNewCertification();
+                      }}
+                      disabled={isTagActionInProgress || (!isCertification && !selectedTagItem) || (isCertification && !newCertificationName.trim())}
                     >
                       {isTagActionInProgress ? 'Adding...' : 'Add'}
                     </button>
@@ -760,6 +963,7 @@ export const EntityDetail = ({
                         setShowTagSelection(false);
                         setSelectedTagItem(null);
                         setIsAddingTag(null);
+                        if (isCertification) setNewCertificationName('');
                       }}
                       disabled={isTagActionInProgress}
                     >
@@ -803,18 +1007,44 @@ export const EntityDetail = ({
                 <Icon icon={getEntityIcon()} size="md" className={getIconTextColor()} />
               </div>
               <div>
-                <div className="flex gap-2">
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      name={Object.keys(entity).find(key => title(entity).includes((entity as any)[key])) || 'name'}
-                      value={title(editData)}
-                      onChange={handleInputChange}
-                      className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                      placeholder={`${entityType} Name`}
-                    />
+                {/* Special handling for attendee first/last name */}
+                {entityType === 'attendee' ? (
+                  <div className="flex gap-2">
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        name="first_name"
+                        value={(editData as Attendee).first_name || ''}
+                        onChange={handleInputChange}
+                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                        placeholder="First Name"
+                      />
+                    </div>
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        name="last_name"
+                        value={(editData as Attendee).last_name || ''}
+                        onChange={handleInputChange}
+                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                        placeholder="Last Name"
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <div className="mt-2">
+                      <input
+                        type="text"
+                        name={Object.keys(entity).find(key => title(entity).includes((entity as any)[key])) || 'name'}
+                        value={title(editData)}
+                        onChange={handleInputChange}
+                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                        placeholder={`${entityType} Name`}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             
@@ -852,60 +1082,62 @@ export const EntityDetail = ({
         </div>
         
         <div className="px-6 py-5 divide-y divide-gray-200">
-          {fields.map((field, index) => (
-            <div key={index} className="grid grid-cols-3 gap-6 py-4">
-              <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-2' : 'center'}`}>
-                <field.icon className="h-5 w-5 text-gray-400 mr-2" />
-                <label htmlFor={field.key} className="block text-sm font-medium text-gray-700">{field.label}</label>
+          {fields.map((field, index) => {
+            return (
+              <div key={index} className="grid grid-cols-3 gap-6 py-4">
+                <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-2' : 'center'}`}>
+                  <field.icon className="h-5 w-5 text-gray-400 mr-2" />
+                  <label htmlFor={field.key} className="block text-sm font-medium text-gray-700">{field.label}</label>
+                </div>
+                <div className="col-span-2">
+                  {field.type === 'textarea' ? (
+                    <div className="mt-2">
+                      <textarea
+                        name={field.key}
+                        id={field.key}
+                        rows={3}
+                        value={(editData as any)[field.key] || ''}
+                        onChange={handleInputChange}
+                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                        placeholder={field.placeholder || `Add ${field.label.toLowerCase()}`}
+                      />
+                    </div>
+                  ) : field.key.includes('.') ? (
+                    // Handle nested objects like city/state
+                    <div className="grid grid-cols-2 gap-4">
+                      {field.key.split('.').map((nestedKey, nestedIdx) => (
+                        <div key={nestedIdx} className="mt-2">
+                          <input
+                            type={field.type || 'text'}
+                            name={nestedKey}
+                            id={nestedKey}
+                            value={(editData as any)[nestedKey] || ''}
+                            onChange={handleInputChange}
+                            className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                            placeholder={field.placeholder?.split(',')[nestedIdx] || nestedKey}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <input
+                        type={field.type || 'text'}
+                        name={field.key}
+                        id={field.key}
+                        value={(editData as any)[field.key] || ''}
+                        onChange={handleInputChange}
+                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                        placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="col-span-2">
-                {field.type === 'textarea' ? (
-                  <div className="mt-2">
-                    <textarea
-                      name={field.key}
-                      id={field.key}
-                      rows={3}
-                      value={(editData as any)[field.key] || ''}
-                      onChange={handleInputChange}
-                      className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                      placeholder={field.placeholder || `Add ${field.label.toLowerCase()}`}
-                    />
-                  </div>
-                ) : field.key.includes('.') ? (
-                  // Handle nested objects like city/state
-                  <div className="grid grid-cols-2 gap-4">
-                    {field.key.split('.').map((nestedKey, nestedIdx) => (
-                      <div key={nestedIdx} className="mt-2">
-                        <input
-                          type={field.type || 'text'}
-                          name={nestedKey}
-                          id={nestedKey}
-                          value={(editData as any)[nestedKey] || ''}
-                          onChange={handleInputChange}
-                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                          placeholder={field.placeholder?.split(',')[nestedIdx] || nestedKey}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-2">
-                    <input
-                      type={field.type || 'text'}
-                      name={field.key}
-                      id={field.key}
-                      value={(editData as any)[field.key] || ''}
-                      onChange={handleInputChange}
-                      className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                      placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           
-          {/* Show tags in edit mode with ability to remove them */}
+          {/* Show tags in edit mode with ability to add/remove them */}
           {tags.map((tagDef, tagIdx) => {
             const items = tagDef.getItems(entity);
             
@@ -940,7 +1172,7 @@ export const EntityDetail = ({
                         </div>
                       </span>
                     )) : (
-                      <span className="text-gray-500 text-sm">No {tagDef.labelKey.toLowerCase()} associated</span>
+                      <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
                     )}
                     
                     {tagDef.addable && (
@@ -1006,7 +1238,7 @@ export const EntityDetail = ({
           <div className="flex items-center gap-2">
             <button 
               onClick={handleEditClick}
-              className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+              className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"
               title="Edit"
             >
               <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
@@ -1122,7 +1354,7 @@ export const EntityDetail = ({
                       </div>
                     </span>
                   )) : (
-                    <span className="text-gray-500 text-sm">No {tagDef.labelKey.toLowerCase()} associated</span>
+                    <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
                   )}
                   
                   {tagDef.addable && (

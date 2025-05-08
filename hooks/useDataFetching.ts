@@ -75,7 +75,7 @@ export function useDataFetching(): UseDataFetchingResult {
       const attendeesQuery = `
         *,
         health_systems (id, name, definitive_id, website, address, city, state, zip),
-        attendee_conferences!inner (
+        attendee_conferences (
           conference_id,
           conferences (
             id,
