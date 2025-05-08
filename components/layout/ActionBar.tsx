@@ -5,14 +5,14 @@ import { apolloService, ApolloEnrichmentResponse, ApolloContactCreate } from '@/
 import { definitiveService, DefinitiveEnrichmentResult } from '@/lib/definitive'
 import { AIEnrichmentResult, ensureColumnExists } from '@/lib/ai'
 import type { Attendee, HealthSystem, Conference } from '@/types'
-import { EnrichmentResultsDialog } from './EnrichmentResultsDialog'
-import { DefinitiveEnrichmentResultsDialog } from './DefinitiveEnrichmentResultsDialog'
-import { AIEnrichmentDialog } from './AIEnrichmentDialog'
-import { AIEnrichmentResultsDialog } from './AIEnrichmentResultsDialog'
-import ApolloListModal from './ApolloListModal'
-import { PushToApolloResultsDialog } from './PushToApolloResultsDialog'
-import { ListModal } from './ListModal'
-import { AddToListResultsDialog } from './AddToListResultsDialog'
+import { EnrichmentResultsDialog } from '@/components/EnrichmentResultsDialog'
+import { DefinitiveEnrichmentResultsDialog } from '@/components/DefinitiveEnrichmentResultsDialog'
+import { AIEnrichmentDialog } from '@/components/AIEnrichmentDialog'
+import { AIEnrichmentResultsDialog } from '@/components/AIEnrichmentResultsDialog'
+import ApolloListModal from '@/components/ApolloListModal'
+import { PushToApolloResultsDialog } from '@/components/PushToApolloResultsDialog'
+import { ListModal } from '@/components/ListModal'
+import { AddToListResultsDialog } from '@/components/AddToListResultsDialog'
 import { supabase } from '@/lib/supabase'
 import type { ColumnDef } from '@tanstack/react-table'
 import { IconName } from '@/hooks/useColumnManagement'
@@ -27,8 +27,6 @@ interface ActionBarProps {
   onListDelete?: (listId: string) => void
   refreshLists?: () => Promise<void>
   allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
-  isLoading?: boolean
-  activeTab?: 'attendees' | 'health-systems' | 'conferences'
   getFieldsForAllColumns: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
@@ -42,8 +40,6 @@ export function ActionBar({
   onListDelete,
   refreshLists,
   allColumns = [],
-  isLoading = false,
-  activeTab = 'attendees',
   getFieldsForAllColumns
 }: ActionBarProps) {
   const { selectedItems, deselectAll } = useSelection()

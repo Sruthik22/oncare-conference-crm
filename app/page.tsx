@@ -349,7 +349,7 @@ export default function Home() {
       }
       return updatedConference;
     });
-  }, []);
+  }, [setConferences]);
 
   const handleHealthSystemUpdate = useCallback(async (updatedHealthSystem: HealthSystem) => {
     console.log('Updating health system with data:', updatedHealthSystem);
@@ -401,7 +401,7 @@ export default function Home() {
       }
       return updatedHealthSystem;
     });
-  }, []);
+  }, [setHealthSystems]);
 
   const handleHealthSystemDelete = useCallback(async (healthSystemId: string) => {
     try {
@@ -425,7 +425,7 @@ export default function Home() {
     } catch (err) {
       console.error('Unexpected error deleting health system:', err)
     }
-  }, []);
+  }, [setHealthSystems]);
 
   const handleConferenceDelete = useCallback(async (conferenceId: string) => {
     try {
@@ -451,7 +451,7 @@ export default function Home() {
     } catch (err) {
       console.error('Unexpected error deleting conference:', err);
     }
-  }, [selectedItem]);
+  }, [setConferences, selectedItem]);
 
   const handleEnrichmentCompleteWrapper = useCallback(async (enrichedData: ApolloEnrichmentResponse) => {
     try {
@@ -459,7 +459,7 @@ export default function Home() {
     } catch (error) {
       console.error('Error in enrichment wrapper:', error);
     }
-  }, [attendees]);
+  }, [attendees, handleEnrichmentComplete]);
 
   // Handle attendee updates (memoize)
   const handleAttendeeUpdate = useCallback((updatedAttendee: Attendee) => {
@@ -469,7 +469,7 @@ export default function Home() {
     setAttendees(prevAttendees => 
       prevAttendees.map(a => a.id === updatedAttendee.id ? updatedAttendee : a)
     );
-  }, []);
+  }, [setAttendees]);
 
   // Handle attendee deletion (memoize)
   const handleAttendeeDelete = useCallback((deletedAttendeeId: string) => {
@@ -479,7 +479,7 @@ export default function Home() {
     setAttendees(prevAttendees => 
       prevAttendees.filter(a => a.id !== deletedAttendeeId)
     );
-  }, []);
+  }, [setAttendees]);
 
   // Memoize the entity item click handler
   const handleItemClick = useCallback((item: Attendee | HealthSystem | Conference) => {
@@ -501,7 +501,7 @@ export default function Home() {
     } else {
       setHealthSystems(prev => [...prev, newEntity as HealthSystem]);
     }
-  }, []);
+  }, [setAttendees, setConferences, setHealthSystems]);
 
   // Memoize menu toggle handler
   const handleMenuToggle = useCallback((menu: 'filter' | 'properties' | 'view-settings') => {
@@ -571,7 +571,7 @@ export default function Home() {
     setAttendees(prevAttendees => 
       prevAttendees.filter(a => !successfullyDeletedIds.includes(a.id))
     );
-  }, []);
+  }, [supabase, setAttendees, setSelectedItem]);
 
   const handleHealthSystemClick = useCallback((healthSystemId: string) => {
     // Find the health system and set it as the selected item
@@ -1103,8 +1103,6 @@ export default function Home() {
           onListDelete={handleListDelete}
           refreshLists={fetchLists}
           allColumns={allColumns}
-          isLoading={isLoading}
-          activeTab={activeTab}
           getFieldsForAllColumns={getFieldsForAllColumns}
         />
       </main>

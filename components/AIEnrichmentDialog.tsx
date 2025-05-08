@@ -69,7 +69,6 @@ export function AIEnrichmentDialog({
 }: AIEnrichmentDialogProps) {
   const [columnName, setColumnName] = useState('')
   const [columnType, setColumnType] = useState('text')
-  const [promptText, setPromptText] = useState('')
   const [isEnriching, setIsEnriching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isTesting, setIsTesting] = useState(false)
@@ -78,7 +77,6 @@ export function AIEnrichmentDialog({
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 })
   const [filterText, setFilterText] = useState('')
   const [selectedVarIndex, setSelectedVarIndex] = useState(0)
-  const [editorFocused, setEditorFocused] = useState(false)
   const [lastCursorPosition, setLastCursorPosition] = useState<{
     node: Node | null;
     offset: number;
@@ -250,9 +248,6 @@ export function AIEnrichmentDialog({
 
   // Handle editor focus events
   const handleEditorFocus = () => {
-    setEditorFocused(true);
-    
-    // Store current cursor position on focus
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
@@ -264,10 +259,6 @@ export function AIEnrichmentDialog({
   };
   
   const handleEditorBlur = () => {
-    setEditorFocused(false);
-    
-    // When editor loses focus, set cursor position to the end of the editor
-    // This ensures that if we click on a variable outside the editor, it will append it
     if (editorRef.current) {
       // Find the last text node in the editor
       let lastNode: Node = editorRef.current;
@@ -291,9 +282,6 @@ export function AIEnrichmentDialog({
 
   // Update filter text based on content after @
   const handleInput = () => {
-    // Save the current content to promptText for API calls
-    setPromptText(getPromptTemplate());
-    
     // Store current cursor position
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
@@ -478,8 +466,7 @@ export function AIEnrichmentDialog({
       });
     }
     
-    // Update prompt text and close menu
-    setPromptText(getPromptTemplate());
+    // Close menu
     setShowVarMenu(false);
   };
 
@@ -595,8 +582,8 @@ export function AIEnrichmentDialog({
       offset: range.startOffset
     });
     
-    // Update prompt text
-    setPromptText(getPromptTemplate());
+    // Close menu
+    setShowVarMenu(false);
   };
   
   // Helper function to get the character before a range

@@ -9,7 +9,7 @@ import {
   CalendarIcon,
 } from '@heroicons/react/24/outline'
 import type { Attendee, HealthSystem } from '@/types'
-import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from './EntityDetail'
+import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/EntityDetail'
 import { supabase } from '@/lib/supabase'
 
 interface AttendeeConference {

@@ -4,7 +4,7 @@ import {
   UserIcon
 } from '@heroicons/react/24/outline'
 import type { Conference } from '@/types'
-import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from './EntityDetail'
+import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/EntityDetail'
 import { supabase } from '@/lib/supabase'
 
 interface ConferenceDetailAdapterProps {

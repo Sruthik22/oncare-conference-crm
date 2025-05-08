@@ -27,8 +27,6 @@ interface ActionBarProps {
   onListDelete?: (listId: string) => void
   refreshLists?: () => Promise<void>
   allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
-  isLoading?: boolean
-  activeTab?: 'attendees' | 'health-systems' | 'conferences'
   getFieldsForAllColumns: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
@@ -42,8 +40,6 @@ export function ActionBar({
   onListDelete,
   refreshLists,
   allColumns = [],
-  isLoading = false,
-  activeTab = 'attendees',
   getFieldsForAllColumns
 }: ActionBarProps) {
   const { selectedItems, deselectAll } = useSelection()

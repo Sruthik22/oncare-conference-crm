@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Icon } from './Icon'
+import { Icon } from '@/components/Icon'
 import { 
   FunnelIcon,
   XMarkIcon,
