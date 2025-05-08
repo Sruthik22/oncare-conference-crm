@@ -14,6 +14,7 @@ export interface AIEnrichmentRequest {
   promptTemplate: string;
   columnName: string;
   columnType: string;
+  getFieldsForAllColumns?: (item: any) => Array<{ id: string, label: string, value: string, iconName: string }>;
 }
 
 /**
@@ -84,13 +85,20 @@ export class AIService {
   /**
    * Test a prompt template on a sample item
    */
-  async testPrompt(item: any, promptTemplate: string, columnName: string, columnType: string): Promise<any> {
+  async testPrompt(
+    item: any, 
+    promptTemplate: string, 
+    columnName: string, 
+    columnType: string, 
+    getFieldsForAllColumns?: (item: any) => Array<{ id: string, label: string, value: string, iconName: string }>
+  ): Promise<any> {
     try {
       const response = await this.client.post('/test-prompt', {
         item,
         promptTemplate,
         columnName,
-        columnType
+        columnType,
+        getFieldsForAllColumns
       });
       
       return response.data;

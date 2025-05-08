@@ -8,7 +8,7 @@ const openai = new OpenAI({
 
 export async function POST(request: Request) {
   try {
-    const { items, promptTemplate, columnName, columnType } = await request.json();
+    const { items, promptTemplate, columnName, columnType, getFieldsForAllColumns } = await request.json();
     
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Invalid items format' }, { status: 400 });
@@ -34,11 +34,21 @@ export async function POST(request: Request) {
         let prompt = promptTemplate;
         
         // Replace all occurrences of variables in the format {{variableName}}
-        // with the corresponding values from the item
         const variableRegex = /\{\{([^}]+)\}\}/g;
+        
+        // Extract fieldsData for this item using getFieldsForAllColumns
+        const fieldsData = getFieldsForAllColumns?.(item) || [];
+        
+        // Create a map of field id to value for easier lookup
+        const fieldMap = new Map(
+          fieldsData.map((field: { id: string, value: string }) => [field.id.toLowerCase(), field.value])
+        );
+        
+        // Replace variables using the field map
         prompt = prompt.replace(variableRegex, (_, variableName) => {
-          const value = item[variableName] || '';
-          return value;
+          const key = variableName.toLowerCase();
+          // Try to get the value from fieldMap first, fall back to direct property access
+          return fieldMap.get(key) || item[variableName] || '';
         });
 
         // Add instructions based on column type

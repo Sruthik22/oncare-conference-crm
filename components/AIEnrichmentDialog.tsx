@@ -5,6 +5,48 @@ import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
 import { aiService } from '@/lib/ai'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
+import type { IconName } from '@/hooks/useColumnManagement'
+import { getColumnIconName } from '@/hooks/useColumnManagement'
+import { Icon } from '@/components/Icon'
+import { getIconComponent } from '@/utils/iconUtils'
+
+// Helper function to get icon SVG path based on icon name
+const getIconPath = (iconName: IconName): string => {
+  switch (iconName) {
+    case 'user':
+      return "M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z";
+    case 'envelope':
+      return "M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75";
+    case 'phone':
+      return "M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z";
+    case 'building':
+      return "M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z";
+    case 'calendar':
+      return "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5";
+    case 'map-pin':
+      return "M15 10.5a3 3 0 11-6 0 3 3 0 016 0z M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z";
+    case 'globe':
+      return "M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418";
+    case 'briefcase':
+      return "M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0M12 12.75h.008v.008H12v-.008z";
+    case 'columns':
+      return "M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z";
+    case 'document-text':
+      return "M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z";
+    case 'link':
+      return "M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244";
+    case 'identification':
+      return "M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z";
+    case 'clock':
+      return "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z";
+    case 'academic-cap':
+      return "M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5";
+    case 'currency-dollar':
+      return "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
+    default:
+      return "M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z"; // columns icon as default
+  }
+};
 
 interface AIEnrichmentDialogProps {
   isOpen: boolean
@@ -13,6 +55,7 @@ interface AIEnrichmentDialogProps {
   onEnrichmentComplete: (results: any[], columnName: string) => void
   allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
   isLoading?: boolean
+  getFieldsForAllColumns?: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
 export function AIEnrichmentDialog({ 
@@ -21,7 +64,8 @@ export function AIEnrichmentDialog({
   items, 
   onEnrichmentComplete,
   allColumns = [],
-  isLoading = false
+  isLoading = false,
+  getFieldsForAllColumns
 }: AIEnrichmentDialogProps) {
   const [columnName, setColumnName] = useState('')
   const [columnType, setColumnType] = useState('text')
@@ -302,7 +346,15 @@ export function AIEnrichmentDialog({
     varTag.className = 'inline-flex items-center mx-0.5 px-2 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800 variable-tag';
     varTag.contentEditable = 'false';
     varTag.setAttribute('data-variable', variable);
-    varTag.textContent = variable;
+    
+    // Create icon element
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'mr-1 h-3.5 w-3.5 inline-block';
+    iconSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 text-indigo-600"><path d="${getIconPath(getColumnIconName(variable))}"></path></svg>`;
+    
+    // Add icon and text to the variable tag
+    varTag.appendChild(iconSpan);
+    varTag.appendChild(document.createTextNode(variable));
     
     // Get the selection
     const selection = window.getSelection();
@@ -443,7 +495,15 @@ export function AIEnrichmentDialog({
     varTag.className = 'inline-flex items-center mx-0.5 px-2 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800 variable-tag';
     varTag.contentEditable = 'false';
     varTag.setAttribute('data-variable', variable);
-    varTag.textContent = variable;
+    
+    // Create icon element
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'mr-1 h-3.5 w-3.5 inline-block';
+    iconSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 text-indigo-600"><path d="${getIconPath(getColumnIconName(String(variable)))}"></path></svg>`;
+    
+    // Add icon and text to the variable tag
+    varTag.appendChild(iconSpan);
+    varTag.appendChild(document.createTextNode(variable));
     
     // Get the selection
     const selection = window.getSelection();
@@ -597,12 +657,15 @@ export function AIEnrichmentDialog({
         return
       }
       
-      // Call AI service to perform enrichment
+      // Call AI service to perform enrichment with proper typing
+      const fields = getFieldsForAllColumns;
+      
       const results = await aiService.enrichItems({
         items,
         promptTemplate,
         columnName,
-        columnType
+        columnType,
+        getFieldsForAllColumns: fields
       })
       
       // Pass the results to the parent component
@@ -638,12 +701,16 @@ export function AIEnrichmentDialog({
         return
       }
       
+      // Test the prompt with proper typing
+      const fields = getFieldsForAllColumns;
+      
       // Test the prompt on the first item
       const result = await aiService.testPrompt(
         items[0],
         promptTemplate,
         columnName,
-        columnType
+        columnType,
+        fields
       )
       
       setTestResult(result)
@@ -671,7 +738,7 @@ export function AIEnrichmentDialog({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" />
+          <div className="fixed inset-0 bg-black bg-opacity-30 transition-opacity" />
         </Transition.Child>
 
         <div className="fixed inset-0 z-10 overflow-y-auto">
@@ -726,15 +793,7 @@ export function AIEnrichmentDialog({
                                         focus:border-primary-500 transition-all duration-200"
                               placeholder="e.g., is_health_system"
                               required
-                              list="column-suggestions"
                             />
-                            <datalist id="column-suggestions">
-                              {allColumns.map((column) => (
-                                <option key={String(column.id)} value={String(column.id)}>
-                                  {String(column.header)}
-                                </option>
-                              ))}
-                            </datalist>
                           </div>
                           <p className="mt-1 text-xs text-blue-600">
                             If this column doesn&apos;t exist, it will be automatically created in the database.
@@ -745,19 +804,24 @@ export function AIEnrichmentDialog({
                           <label htmlFor="columnType" className="block text-sm font-medium text-gray-700">
                             Column Type
                           </label>
-                          <div className="mt-2">
+                          <div className="mt-2 relative">
                             <select
                               id="columnType"
                               value={columnType}
                               onChange={(e) => setColumnType(e.target.value)}
-                              className="block w-full px-3 py-2.5 text-sm bg-white border border-gray-200 
+                              className="block w-full pl-3 pr-9 py-2.5 text-sm bg-white border border-gray-200 
                                         rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 
-                                        focus:border-primary-500 transition-all duration-200"
+                                        focus:border-primary-500 transition-all duration-200 appearance-none"
                             >
                               <option value="text">Text</option>
                               <option value="boolean">Boolean (Yes/No)</option>
                               <option value="number">Number</option>
                             </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                              <svg className="h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                              </svg>
+                            </div>
                           </div>
                         </div>
                         
@@ -802,6 +866,11 @@ export function AIEnrichmentDialog({
                                         }`}
                                         onClick={() => insertVariable(variable)}
                                       >
+                                        <Icon 
+                                          icon={getIconComponent(getColumnIconName(variable))} 
+                                          size="sm" 
+                                          className="text-gray-500 mr-2 flex-shrink-0" 
+                                        />
                                         <span className={index === selectedVarIndex ? 'font-medium' : ''}>{variable}</span>
                                       </li>
                                     ))
@@ -827,6 +896,11 @@ export function AIEnrichmentDialog({
                                       className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 cursor-pointer hover:bg-blue-200"
                                       onClick={() => insertAvailableVariable(String(column.id))}
                                     >
+                                      <Icon 
+                                        icon={getIconComponent(getColumnIconName(String(column.id)))} 
+                                        size="xs" 
+                                        className="text-blue-700 mr-1 flex-shrink-0" 
+                                      />
                                       {String(column.header)}
                                     </span>
                                   ))}

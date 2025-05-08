@@ -999,6 +999,7 @@ export function ActionBar({
         items={selectedItems}
         onEnrichmentComplete={(results, columnName) => handleAIEnrichmentComplete(results, columnName)}
         allColumns={allColumns}
+        getFieldsForAllColumns={getFieldsForAllColumns}
       />
       
       <AIEnrichmentResultsDialog
