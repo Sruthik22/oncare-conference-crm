@@ -9,6 +9,7 @@ interface Tab {
   id: 'attendees' | 'health-systems' | 'conferences'
   label: string
   count: number
+  filteredCount?: number
   icon: typeof UserIcon
 }
 
@@ -26,6 +27,11 @@ interface TabNavigationProps {
     'health-systems': number
     conferences: number
   }
+  filteredCounts?: {
+    attendees?: number
+    'health-systems'?: number
+    conferences?: number
+  }
   activeListId?: string | null
   onListSelect?: (listId: string | null) => void
   refreshLists?: () => Promise<void>
@@ -40,6 +46,7 @@ export function TabNavigation({
   activeTab, 
   onTabChange, 
   counts, 
+  filteredCounts,
   activeListId, 
   onListSelect, 
   refreshLists,
@@ -56,9 +63,27 @@ export function TabNavigation({
   const { user, signOut, isLoading: authLoading } = useAuth()
   
   const tabs: Tab[] = [
-    { id: 'attendees', label: 'Attendees', count: counts.attendees, icon: UserIcon },
-    { id: 'health-systems', label: 'Health Systems', count: counts['health-systems'], icon: BuildingOfficeIcon },
-    { id: 'conferences', label: 'Conferences', count: counts.conferences, icon: CalendarIcon },
+    { 
+      id: 'attendees', 
+      label: 'Attendees', 
+      count: counts.attendees, 
+      filteredCount: filteredCounts?.attendees,
+      icon: UserIcon 
+    },
+    { 
+      id: 'health-systems', 
+      label: 'Health Systems', 
+      count: counts['health-systems'], 
+      filteredCount: filteredCounts?.['health-systems'],
+      icon: BuildingOfficeIcon 
+    },
+    { 
+      id: 'conferences', 
+      label: 'Conferences', 
+      count: counts.conferences, 
+      filteredCount: filteredCounts?.conferences,
+      icon: CalendarIcon 
+    },
   ]
 
   // Update filtered lists when lists change or search term changes
@@ -243,7 +268,7 @@ export function TabNavigation({
                       aria-hidden="true"
                       className="ml-auto w-9 min-w-max rounded-full bg-white px-2.5 py-0.5 text-center text-xs/5 font-medium whitespace-nowrap text-gray-600 ring-1 ring-gray-200 ring-inset"
                     >
-                      {tab.count}
+                      {tab.filteredCount !== undefined ? tab.filteredCount : tab.count}
                     </span>
                   </button>
                 </li>

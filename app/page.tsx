@@ -282,6 +282,13 @@ export default function Home() {
         : filteredConferences;
   }, [activeTab, filteredAttendees, filteredHealthSystems, filteredConferences]);
 
+  // Memoize filtered counts for tabs
+  const filteredCounts = useMemo(() => ({
+    attendees: filteredAttendees.length,
+    'health-systems': filteredHealthSystems.length,
+    conferences: filteredConferences.length
+  }), [filteredAttendees, filteredHealthSystems, filteredConferences]);
+
   const handleSearch = useCallback((term: string) => {
     setSearchTerm(term);
   }, []);
@@ -723,7 +730,7 @@ export default function Home() {
           </div>
         )}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-40">
-          <div className="flex items-center gap-4 w-full lg:max-w-xl">
+          <div className="flex flex-col gap-2 w-full lg:max-w-xl">
             <SearchBar 
               placeholder={`Search ${activeTab === 'health-systems' ? 'Health Systems' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}...`}
               onSearch={handleSearch}
@@ -731,6 +738,13 @@ export default function Home() {
               activeTab={activeTab}
               isLoading={isLoading}
             />
+            
+            {/* Show results count when filtering is active */}
+            {(searchTerm || activeFilters.length > 0 || activeListId) && (
+              <div className="text-sm text-gray-500 ml-1">
+                <span>{currentItems.length} results showing</span>
+              </div>
+            )}
           </div>
           
           <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 whitespace-nowrap min-w-fit lg:w-auto lg:ml-auto relative z-40">
@@ -834,7 +848,7 @@ export default function Home() {
     handleHealthSystemUpdate, handleHealthSystemDelete, 
     handleConferenceUpdate, handleConferenceDelete,
     handleAttendeeUpdate, handleAttendeeDelete,
-    getFieldsForItem, getVisibleColumns
+    getFieldsForItem, getVisibleColumns, filteredCounts
   ]);
 
   // Fetch lists function to be shared between components
@@ -1059,6 +1073,7 @@ export default function Home() {
               'health-systems': healthSystems.length,
               conferences: conferences.length
             }}
+            filteredCounts={filteredCounts}
             activeListId={activeListId}
             onListSelect={handleListSelect}
             refreshLists={fetchLists}
@@ -1089,6 +1104,8 @@ export default function Home() {
           refreshLists={fetchLists}
           allColumns={allColumns}
           isLoading={isLoading}
+          activeTab={activeTab}
+          getFieldsForAllColumns={getFieldsForAllColumns}
         />
       </main>
     </SelectionProvider>

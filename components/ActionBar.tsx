@@ -15,6 +15,7 @@ import { ListModal } from './ListModal'
 import { AddToListResultsDialog } from './AddToListResultsDialog'
 import { supabase } from '@/lib/supabase'
 import type { ColumnDef } from '@tanstack/react-table'
+import { IconName } from '@/hooks/useColumnManagement'
 
 interface ActionBarProps {
   onEnrichmentComplete: (enrichedData: ApolloEnrichmentResponse) => void
@@ -27,6 +28,8 @@ interface ActionBarProps {
   refreshLists?: () => Promise<void>
   allColumns?: ColumnDef<Attendee | HealthSystem | Conference>[]
   isLoading?: boolean
+  activeTab?: 'attendees' | 'health-systems' | 'conferences'
+  getFieldsForAllColumns: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
 export function ActionBar({ 
@@ -39,7 +42,9 @@ export function ActionBar({
   onListDelete,
   refreshLists,
   allColumns = [],
-  isLoading = false
+  isLoading = false,
+  activeTab = 'attendees',
+  getFieldsForAllColumns
 }: ActionBarProps) {
   const { selectedItems, deselectAll } = useSelection()
   const [isEnriching, setIsEnriching] = useState(false)
@@ -134,76 +139,17 @@ export function ActionBar({
       
       if (hasAttendees) {
         const selectedAttendees = getSelectedAttendees()
-        const attendeeIds = selectedAttendees.map(a => a.id)
         
-        // Fetch attendees with their relationships
-        const { data: attendeesWithRelationships, error: fetchError } = await supabase
-          .from('attendees')
-          .select(`
-            *,
-            health_systems(*),
-            attendee_conferences(
-              *,
-              conferences(*)
-            )
-          `)
-          .in('id', attendeeIds)
+        // Get all fields for the first attendee to determine columns
+        const firstItemFields = getFieldsForAllColumns(selectedAttendees[0])
         
-        if (fetchError) {
-          throw new Error(`Failed to fetch attendee relationships: ${fetchError.message}`)
-        }
+        // Create CSV header from field labels
+        const csvHeader = firstItemFields.map((field: { label: string }) => field.label).join(',')
         
-        // Get all keys from the first attendee in the database and the selected attendees
-        let allKeys = new Set<string>()
-        
-        // Basic attendee fields
-        attendeesWithRelationships?.forEach(attendee => {
-          Object.keys(attendee as Record<string, any>).forEach(key => {
-            // Skip relationship objects, we'll handle them specially
-            if (typeof (attendee as Record<string, any>)[key] !== 'object' || 
-                key === 'certifications' || 
-                (attendee as Record<string, any>)[key] === null) {
-              allKeys.add(key)
-            }
-          })
-        })
-        
-        // Add special relationship fields
-        allKeys.add('health_system_name')
-        allKeys.add('conferences')
-        
-        // Convert to array and sort
-        const allColumns = Array.from(allKeys).sort()
-        
-        // Create CSV header - convert snake_case to Title Case
-        const csvHeader = allColumns.map(key => {
-          return key.split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ')
-        }).join(',')
-        
-        // Convert attendees to CSV rows with all properties
-        const csvRows = (attendeesWithRelationships || []).map(attendee => {
-          return allColumns.map(key => {
-            // Handle special relationship fields
-            if (key === 'health_system_name') {
-              return escapeCSV(attendee.health_systems?.name)
-            }
-            
-            if (key === 'conferences') {
-              // Extract conference names from the attendee_conferences relationship
-              if (attendee.attendee_conferences && Array.isArray(attendee.attendee_conferences)) {
-                const conferenceNames = attendee.attendee_conferences
-                  .map((ac: any) => ac.conferences?.name)
-                  .filter(Boolean)
-                return escapeCSV(conferenceNames.join('; '))
-              }
-              return escapeCSV('')
-            }
-            
-            // Handle normal fields
-            return escapeCSV((attendee as Record<string, any>)[key])
-          }).join(',')
+        // Create CSV rows for each attendee
+        const csvRows = selectedAttendees.map(attendee => {
+          const fields = getFieldsForAllColumns(attendee)
+          return fields.map((field: { value: string }) => escapeCSV(field.value)).join(',')
         })
         
         // Combine header and rows
@@ -213,65 +159,17 @@ export function ActionBar({
         downloadCSV(csvContent, `${conferenceName || 'attendees'}_export`)
       } else if (hasHealthSystems) {
         const selectedHealthSystems = getSelectedHealthSystems()
-        const healthSystemIds = selectedHealthSystems.map(hs => hs.id)
         
-        // Fetch health systems with their associated attendees
-        const { data: healthSystemsWithRelationships, error: fetchError } = await supabase
-          .from('health_systems')
-          .select(`
-            *,
-            attendees(id, first_name, last_name, title, email, phone)
-          `)
-          .in('id', healthSystemIds)
+        // Get all fields for the first health system to determine columns
+        const firstItemFields = getFieldsForAllColumns(selectedHealthSystems[0])
         
-        if (fetchError) {
-          throw new Error(`Failed to fetch health system relationships: ${fetchError.message}`)
-        }
+        // Create CSV header from field labels
+        const csvHeader = firstItemFields.map((field: { label: string }) => field.label).join(',')
         
-        // Get all keys from the health systems
-        let allKeys = new Set<string>()
-        
-        // Basic health system fields
-        healthSystemsWithRelationships?.forEach(system => {
-          Object.keys(system as Record<string, any>).forEach(key => {
-            // Skip relationship objects, we'll handle them specially
-            if (typeof (system as Record<string, any>)[key] !== 'object' || 
-                (system as Record<string, any>)[key] === null) {
-              allKeys.add(key)
-            }
-          })
-        })
-        
-        // Add special relationship fields
-        allKeys.add('associated_attendees')
-        
-        // Convert to array and sort
-        const allColumns = Array.from(allKeys).sort()
-        
-        // Create CSV header - convert snake_case to Title Case
-        const csvHeader = allColumns.map(key => {
-          return key.split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ')
-        }).join(',')
-        
-        // Convert health systems to CSV rows with all properties
-        const csvRows = (healthSystemsWithRelationships || []).map(system => {
-          return allColumns.map(key => {
-            // Handle special relationship fields
-            if (key === 'associated_attendees') {
-              // Extract attendee names from the relationship
-              if (system.attendees && Array.isArray(system.attendees)) {
-                const attendeeNames = system.attendees
-                  .map((att: any) => `${att.first_name} ${att.last_name}${att.title ? ` (${att.title})` : ''}`)
-                return escapeCSV(attendeeNames.join('; '))
-              }
-              return escapeCSV('')
-            }
-            
-            // Handle normal fields
-            return escapeCSV((system as Record<string, any>)[key])
-          }).join(',')
+        // Create CSV rows for each health system
+        const csvRows = selectedHealthSystems.map(healthSystem => {
+          const fields = getFieldsForAllColumns(healthSystem)
+          return fields.map((field: { value: string }) => escapeCSV(field.value)).join(',')
         })
         
         // Combine header and rows
@@ -281,77 +179,17 @@ export function ActionBar({
         downloadCSV(csvContent, `health_systems_export`)
       } else if (hasConferences) {
         const selectedConferences = getSelectedConferences()
-        const conferenceIds = selectedConferences.map(c => c.id)
         
-        // Fetch conferences with their attendees
-        const { data: conferencesWithRelationships, error: fetchError } = await supabase
-          .from('conferences')
-          .select(`
-            *,
-            attendee_conferences(
-              *,
-              attendees(id, first_name, last_name, title, company, email, phone)
-            )
-          `)
-          .in('id', conferenceIds)
+        // Get all fields for the first conference to determine columns
+        const firstItemFields = getFieldsForAllColumns(selectedConferences[0])
         
-        if (fetchError) {
-          throw new Error(`Failed to fetch conference relationships: ${fetchError.message}`)
-        }
+        // Create CSV header from field labels
+        const csvHeader = firstItemFields.map((field: { label: string }) => field.label).join(',')
         
-        // Get all keys from the conferences
-        let allKeys = new Set<string>()
-        
-        // Basic conference fields
-        conferencesWithRelationships?.forEach(conference => {
-          Object.keys(conference as Record<string, any>).forEach(key => {
-            // Skip relationship objects, we'll handle them specially
-            if (typeof (conference as Record<string, any>)[key] !== 'object' || 
-                (conference as Record<string, any>)[key] === null) {
-              allKeys.add(key)
-            }
-          })
-        })
-        
-        // Add special relationship fields
-        allKeys.add('attendees_count')
-        allKeys.add('attendees_list')
-        
-        // Convert to array and sort
-        const allColumns = Array.from(allKeys).sort()
-        
-        // Create CSV header - convert snake_case to Title Case
-        const csvHeader = allColumns.map(key => {
-          return key.split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ')
-        }).join(',')
-        
-        // Convert conferences to CSV rows with all properties
-        const csvRows = (conferencesWithRelationships || []).map(conference => {
-          return allColumns.map(key => {
-            // Handle special relationship fields
-            if (key === 'attendees_count') {
-              return escapeCSV(conference.attendee_conferences?.length || 0)
-            }
-            
-            if (key === 'attendees_list') {
-              // Extract attendee names from the relationship
-              if (conference.attendee_conferences && Array.isArray(conference.attendee_conferences)) {
-                const attendeeNames = conference.attendee_conferences
-                  .filter((ac: any) => ac.attendees) // Only include those with attendee data
-                  .map((ac: any) => {
-                    const att = ac.attendees
-                    return `${att.first_name} ${att.last_name}${att.title ? ` (${att.title})` : ''}`
-                  })
-                return escapeCSV(attendeeNames.join('; '))
-              }
-              return escapeCSV('')
-            }
-            
-            // Handle normal fields
-            return escapeCSV((conference as Record<string, any>)[key])
-          }).join(',')
+        // Create CSV rows for each conference
+        const csvRows = selectedConferences.map(conference => {
+          const fields = getFieldsForAllColumns(conference)
+          return fields.map((field: { value: string }) => escapeCSV(field.value)).join(',')
         })
         
         // Combine header and rows
