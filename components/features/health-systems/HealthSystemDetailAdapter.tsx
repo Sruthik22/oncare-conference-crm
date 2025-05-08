@@ -6,7 +6,7 @@ import {
   UserIcon
 } from '@heroicons/react/24/outline'
 import type { HealthSystem } from '@/types'
-import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/EntityDetail'
+import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/features/entities/EntityDetail'
 import { supabase } from '@/lib/supabase'
 
 interface HealthSystemDetailAdapterProps {

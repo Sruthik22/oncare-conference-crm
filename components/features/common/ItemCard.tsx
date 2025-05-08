@@ -2,7 +2,7 @@ import { ReactNode } from 'react'
 import { useSelection } from '@/lib/context/SelectionContext'
 import { Checkbox } from '@/components/ui/checkbox'
 import { IconName } from '@/hooks/useColumnManagement'
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { getIconComponent } from '@/utils/iconUtils'
 
 interface FieldDisplayProps {

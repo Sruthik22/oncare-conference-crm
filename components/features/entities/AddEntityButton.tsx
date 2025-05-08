@@ -1,9 +1,9 @@
 import { useState, Fragment } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { AttendeeDetailAdapter } from './AttendeeDetailAdapter'
-import { ConferenceDetailAdapter } from './ConferenceDetailAdapter'
-import { HealthSystemDetailAdapter } from './HealthSystemDetailAdapter'
+import { AttendeeDetailAdapter } from '../attendees/AttendeeDetailAdapter'
+import { ConferenceDetailAdapter } from '../conferences/ConferenceDetailAdapter'
+import { HealthSystemDetailAdapter } from '../health-systems/HealthSystemDetailAdapter'
 import type { Attendee, Conference, HealthSystem } from '@/types'
 
 // Helper to generate a valid UUID format

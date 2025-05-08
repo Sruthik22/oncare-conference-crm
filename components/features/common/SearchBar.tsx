@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { MagnifyingGlassIcon, XMarkIcon, SparklesIcon } from '@heroicons/react/24/outline'
-import { Icon } from '@/components/Icon'
-import { ChatInterface } from '@/components/ChatInterface'
+import { Icon } from '@/components/ui/Icon'
+import { ChatInterface } from '@/components/features/chat/ChatInterface'
 
 interface SearchBarProps {
   placeholder?: string

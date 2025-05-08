@@ -7,9 +7,10 @@ import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 import type { IconName } from '@/hooks/useColumnManagement'
 import { getColumnIconName } from '@/hooks/useColumnManagement'
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { getIconComponent } from '@/utils/iconUtils'
 
+// TODO: get icon path from iconUtils
 // Helper function to get icon SVG path based on icon name
 const getIconPath = (iconName: IconName): string => {
   switch (iconName) {

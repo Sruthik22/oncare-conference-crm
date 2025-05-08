@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { PaperAirplaneIcon, SparklesIcon, XMarkIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
-import { Icon } from '@/components/Icon';
+import { Icon } from '@/components/ui/Icon';
 
 interface ChatMessage {
   role: 'user' | 'assistant';

@@ -1,4 +1,4 @@
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { ViewColumnsIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
 
 interface ViewSettingsMenuProps {

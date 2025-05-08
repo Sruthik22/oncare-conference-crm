@@ -1,4 +1,4 @@
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { UserIcon, BuildingOfficeIcon, CalendarIcon, TagIcon, ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon, TrashIcon, PencilIcon, CheckIcon, XMarkIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline'
 import Image from 'next/image'
 import { useEffect, useState } from 'react'

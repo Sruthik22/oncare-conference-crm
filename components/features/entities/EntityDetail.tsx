@@ -9,14 +9,14 @@ import {
   PlusCircleIcon,
   XMarkIcon
 } from '@heroicons/react/24/outline'
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import type { Attendee, Conference, HealthSystem } from '@/types'
 import { supabase } from '@/lib/supabase'
-import ApolloIntegration from './ApolloIntegration'
+import ApolloIntegration from '@/components/features/apollo/ApolloIntegration'
 import { ApolloEnrichmentResponse } from '@/lib/apollo'
 import { handleEnrichmentComplete as enrichAttendee } from '@/lib/enrichment'
 import { Dialog, Transition } from '@headlessui/react'
-import { DeleteResultsDialog } from './DeleteResultsDialog'
+import { DeleteResultsDialog } from '@/components/features/ai-enrichment/DeleteResultsDialog'
 
 // Define the base entity types
 export type EntityTypes = Attendee | Conference | HealthSystem

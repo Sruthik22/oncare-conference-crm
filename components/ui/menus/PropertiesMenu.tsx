@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Icon } from '@/components/Icon'
+import { Icon } from '@/components/ui/Icon'
 import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
 import { getIconComponent } from '@/utils/iconUtils'
 import { getColumnIconName } from '@/hooks/useColumnManagement'
