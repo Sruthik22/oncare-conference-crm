@@ -90,7 +90,7 @@ export function ItemCard({
     }
     
     // Default display
-    return <span className="text-gray-900 ml-2 truncate">{value}</span>;
+    return <span className="text-gray-900 ml-2 truncate">{String(value)}</span>;
   };
 
   return (

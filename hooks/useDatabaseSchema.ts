@@ -41,6 +41,7 @@ export function useDatabaseSchema() {
       setError(null)
 
       try {
+        // TODO: get all of the tables that we need
         // Fetch columns from all relevant tables
         const { data: columnData, error: columnsError } = await supabase.rpc('get_table_columns', {
           table_names: ['attendees', 'health_systems', 'conferences', 'attendee_conferences']

@@ -94,7 +94,7 @@ export function useDataFetching(): UseDataFetchingResult {
         attendee_conferences (
           id,
           attendee_id,
-          attendee:attendees (
+          attendees:attendees (
             id,
             first_name,
             last_name,
@@ -105,8 +105,20 @@ export function useDataFetching(): UseDataFetchingResult {
       `
       const conferencesData = await fetchAllRecords<Conference>('conferences', conferencesQuery, 1000)
       
-      // Fetch all health systems
-      const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', '*', 1000)
+      // Fetch all health systems with related attendees
+      const healthSystemsQuery = `
+        *,
+        attendees (
+          id,
+          first_name,
+          last_name,
+          title,
+          company,
+          email,
+          phone
+        )
+      `
+      const healthSystemsData = await fetchAllRecords<HealthSystem>('health_systems', healthSystemsQuery, 1000)
 
       // Update state with fetched data
       setAttendees(attendeesData)

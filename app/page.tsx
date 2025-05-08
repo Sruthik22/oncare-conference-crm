@@ -26,7 +26,7 @@ import {
 import { Icon } from '@/components/Icon'
 import { useDataFetching } from '@/hooks/useDataFetching'
 import { useFiltering } from '@/hooks/useFiltering'
-import { useColumnManagement } from '@/hooks/useColumnManagement'
+import { useColumnManagement, IconName } from '@/hooks/useColumnManagement'
 import { supabase } from '@/lib/supabase'
 import { ActionBar } from '@/components/ActionBar'
 import { ApolloEnrichmentResponse } from '@/lib/apollo'

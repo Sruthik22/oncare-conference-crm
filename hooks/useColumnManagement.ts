@@ -22,6 +22,8 @@ export interface FieldInfo {
   iconName: IconName // Icon name to be resolved by the consumer
   accessorFn?: (item: any) => any  // Function to extract value
   accessorKey?: string             // Direct key to access value
+  isForeignKey?: boolean           // Whether this field is a foreign key
+  foreignTable?: string            // The referenced table (if a foreign key)
 }
 
 interface UseColumnManagementResult {
@@ -68,6 +70,12 @@ export const getColumnIconName = (columnId: string): IconName => {
       return 'identification';
     case 'revenue':
       return 'currency-dollar';
+    case 'attendees':
+      return 'user';
+    case 'health_systems':
+      return 'building';
+    case 'conferences':
+      return 'calendar';
     default:
       // Try to determine icon based on columnId
       if (columnId.includes('email')) {
@@ -96,6 +104,35 @@ export const getColumnIconName = (columnId: string): IconName => {
       return 'columns';
   }
 }
+
+// Helper function to get the display field for an entity type
+const getDefaultDisplayField = (tableName: string): string => {
+  switch (tableName) {
+    case 'attendees':
+      return 'name'; // Virtual field that combines first_name and last_name
+    case 'health_systems':
+    case 'conferences':
+      return 'name';
+    default:
+      return 'name';
+  }
+};
+
+// Helper to safely get an icon for a table
+const getTableIcon = (tableName: string | undefined): IconName => {
+  if (!tableName) return 'columns';
+  
+  switch (tableName) {
+    case 'attendees':
+      return 'user';
+    case 'health_systems':
+      return 'building';
+    case 'conferences':
+      return 'calendar';
+    default:
+      return 'columns';
+  }
+};
 
 export function useColumnManagement({
   activeTab
@@ -140,71 +177,282 @@ export function useColumnManagement({
   const getFieldsInfo = (): FieldInfo[] => {
     const fields: FieldInfo[] = [];
     
-    // Filter columns for the current tab
-    const relevantColumns = dbColumns.filter(col => {
-      switch(activeTab) {
-        case 'attendees': return col.table === 'attendees';
-        case 'health-systems': return col.table === 'health_systems';
-        case 'conferences': return col.table === 'conferences';
-        default: return false;
+    // Map tab name to entity table name
+    const tabToTableName = {
+      'attendees': 'attendees',
+      'health-systems': 'health_systems',
+      'conferences': 'conferences'
+    };
+    
+    const currentEntityTable = tabToTableName[activeTab];
+    const mainTables = ['attendees', 'health_systems', 'conferences'];
+    
+    // 1. Get columns from the current entity table
+    const mainTableColumns = dbColumns.filter(col => col.table === currentEntityTable);
+    
+    // Process main table columns
+    mainTableColumns.forEach(col => {
+      if (activeTab === 'attendees' && col.id === 'name') {
+        fields.push({
+          id: 'name',
+          label: 'Name',
+          iconName: getColumnIconName('name'),
+          accessorFn: (row: any) => `${row.first_name} ${row.last_name}`,
+        });
+      } else if (activeTab === 'health-systems' && col.id === 'location') {
+        fields.push({
+          id: 'location',
+          label: 'Location',
+          iconName: getColumnIconName('location'),
+          accessorFn: (row: any) => `${row.city || ''}, ${row.state || ''}`,
+        });
+      } else if (activeTab === 'conferences' && col.id === 'date') {
+        fields.push({
+          id: 'date',
+          label: 'Date',
+          iconName: getColumnIconName('date'),
+          accessorFn: (row: any) => {
+            if (!row.start_date) return '';
+            const start = new Date(row.start_date).toLocaleDateString();
+            const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null;
+            return end ? `${start} - ${end}` : start;
+          },
+        });
+      } else if (col.is_foreign_key && col.foreign_table) {
+        // This is a direct foreign key within the main table (e.g., health_system_id in attendees)
+        const displayName = col.header;
+        
+        fields.push({
+          id: col.id,
+          label: displayName,
+          iconName: getTableIcon(col.foreign_table),
+          isForeignKey: true,
+          foreignTable: col.foreign_table,
+          accessorFn: (row: any) => {
+            try {
+              const foreignKeyValue = row[col.id]; // row within atendee - to get health system id
+              if (!foreignKeyValue) return '';
+              
+              // Determine the property name for the related entity
+              // It might be in different formats depending on how the data was loaded
+              const possibleKeys = [
+                `${col.foreign_table}`, // singular (e.g., health_system)
+                `${col.foreign_table}s`, // plural (e.g., health_systems)
+                col.foreign_table.replace('_', '') // without underscore (e.g., healthsystem)
+              ];
+
+              // NOTE: this accessorFn is called for each row in the original table (i.e. attendees)
+              // but we could instead match foreignKeyValue to a row in foreignTable[foreignColumn]
+              // and get row[default value]
+
+              // Find the first key that exists in the row
+              let relatedEntity = null;
+              for (const key of possibleKeys) {
+                if (row[key] !== undefined) {
+                  relatedEntity = row[key];
+                  break;
+                }
+              }
+              
+              if (relatedEntity) {
+                // Get the display field for this entity type
+                const displayField = getDefaultDisplayField(col.foreign_table || '');
+                
+                if (displayField === 'name' && !relatedEntity.name && relatedEntity.first_name) {
+                  // Special case for attendees where we need to combine first and last name
+                  return `${relatedEntity.first_name} ${relatedEntity.last_name || ''}`;
+                }
+                
+                return relatedEntity[displayField] || String(foreignKeyValue);
+              }
+              
+              return String(foreignKeyValue); // Return the ID if the entity isn't loaded
+            } catch (error) {
+              console.error(`Error accessing relationship for ${col.id}:`, error);
+              return '';
+            }
+          }
+        });
+      } else {
+        // Regular column
+        fields.push({
+          id: col.id,
+          label: col.header,
+          iconName: getColumnIconName(col.id || ''),
+          accessorKey: col.id,
+        });
       }
     });
     
-    // Create field info for each database column
-    relevantColumns.forEach(col => {
-      if (activeTab === 'attendees') {
-        if (col.id === 'name') {
-          fields.push({
-            id: 'name',
-            label: 'Name',
-            iconName: getColumnIconName('name'),
-            accessorFn: (row: any) => `${row.first_name} ${row.last_name}`,
-          });
-        } else {
-          fields.push({
-            id: col.id,
-            label: col.header,
-            iconName: getColumnIconName(col.id),
-            accessorKey: col.id,
-          });
-        }
-      } else if (activeTab === 'health-systems') {
-        if (col.id === 'location') {
-          fields.push({
-            id: 'location',
-            label: 'Location',
-            iconName: getColumnIconName('location'),
-            accessorFn: (row: any) => `${row.city || ''}, ${row.state || ''}`,
-          });
-        } else {
-          fields.push({
-            id: col.id,
-            label: col.header,
-            iconName: getColumnIconName(col.id),
-            accessorKey: col.id,
-          });
-        }
-      } else if (activeTab === 'conferences') {
-        if (col.id === 'date') {
-          fields.push({
-            id: 'date',
-            label: 'Date',
-            iconName: getColumnIconName('date'),
-            accessorFn: (row: any) => {
-              if (!row.start_date) return '';
-              const start = new Date(row.start_date).toLocaleDateString();
-              const end = row.end_date ? new Date(row.end_date).toLocaleDateString() : null;
-              return end ? `${start} - ${end}` : start;
-            },
-          });
-        } else {
-          fields.push({
-            id: col.id,
-            label: col.header,
-            iconName: getColumnIconName(col.id),
-            accessorKey: col.id,
-          });
-        }
+    // 2. Find junction tables (tables that aren't main tables)
+    const junctionTables = dbColumns
+      .filter(col => !mainTables.includes(col.table))
+      .map(col => col.table)
+      .filter((value, index, self) => self.indexOf(value) === index); // Deduplicate
+    
+    // 3. For each junction table, check if it links to the current entity
+    junctionTables.forEach(junctionTable => {
+      // Find columns in this junction table that link to the current entity
+      const linksToCurrentEntity = dbColumns.some(col => 
+        col.table === junctionTable && 
+        col.is_foreign_key && 
+        col.foreign_table === currentEntityTable
+      );
+      
+      // If this junction table links to our current entity
+      if (linksToCurrentEntity) {
+        // Find all foreign key columns in this junction table that link to OTHER entities
+        const linkedColumns = dbColumns.filter(col => 
+          col.table === junctionTable && 
+          col.is_foreign_key && 
+          col.foreign_table !== currentEntityTable
+        );
+        
+        // Add these linked columns to our fields list
+        linkedColumns.forEach(col => {
+          if (col.foreign_table) {
+            const linkedEntityName = col.foreign_table
+              .split('_')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+              
+            fields.push({
+              id: `${junctionTable}_${col.id}`,
+              label: linkedEntityName,
+              iconName: getTableIcon(col.foreign_table),
+              isForeignKey: true,
+              foreignTable: col.foreign_table,
+              accessorFn: (row: any) => {
+                // again same approach to do the accessorFn - row of foreigntable[foreignColumn] = row[id]
+                // selected row[default value]
+                try {
+                  // There are multiple ways the junction data might be loaded
+                  // Try different property naming patterns
+                  const junctionKeys = [
+                    `${junctionTable}s`, // plural (e.g., attendee_conferences)
+                    junctionTable, // singular
+                    junctionTable.replace('_', '') // without underscore
+                  ];
+                  
+                  let junctionItems = null;
+                  for (const key of junctionKeys) {
+                    if (row[key] && (Array.isArray(row[key]) || typeof row[key] === 'object')) {
+                      junctionItems = Array.isArray(row[key]) ? row[key] : [row[key]];
+                      break;
+                    }
+                  }
+                  
+                  // If no junction data found, return empty string
+                  if (!junctionItems || junctionItems.length === 0) {
+                    return '';
+                  }
+                  
+                  // The related entity could be under different property names
+                  const relatedEntityKeys = [
+                    `${col.foreign_table}s`, // plural (e.g., conferences)
+                    `${col.foreign_table}`, // singular (e.g., conference)
+                    col.foreign_table?.replace('_', '') // without underscore
+                  ];
+                  
+                  // Extract names from linked entities and join with commas
+                  const names: string[] = [];
+                  
+                  junctionItems.forEach(item => {
+                    // Try to find the related entity under different key patterns
+                    let linkedEntity = null;
+                    for (const key of relatedEntityKeys) {
+                      if (key && item[key]) {
+                        linkedEntity = item[key];
+                        break;
+                      }
+                    }
+
+                    if (linkedEntity) {
+                      if (linkedEntity.name) {
+                        names.push(linkedEntity.name);
+                      } else if (linkedEntity.first_name && linkedEntity.last_name) {
+                        names.push(`${linkedEntity.first_name} ${linkedEntity.last_name}`);
+                      }
+                    }
+                  });
+                  
+                  return names.join(', ');
+                } catch (error) {
+                  console.error(`Error accessing junction relationship for ${col.id}:`, error);
+                  return '';
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+    
+    // 4. Find reverse relationships (one-to-many) - other tables that reference this entity
+    // Skip junction tables which we already handled
+    mainTables.forEach(otherTable => {
+      // Skip the current table
+      if (otherTable === currentEntityTable) return;
+      
+      // Find columns in the other table that reference our current entity
+      const referencingColumns = dbColumns.filter(col => 
+        col.table === otherTable && 
+        col.is_foreign_key && 
+        col.foreign_table === currentEntityTable
+      );
+      
+      // If we found any referencing columns
+      if (referencingColumns.length > 0) {
+        // Format the display name
+        const otherEntityName = otherTable
+          .split('_')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        
+        fields.push({
+          id: `reverse_${otherTable}`,
+          label: otherEntityName,
+          iconName: getTableIcon(otherTable),
+          accessorFn: (row: any) => {
+            try {
+              // For reverse relationships, we access the array of related entities directly
+              const relatedEntityKeys = [
+                `${otherTable}s`, // plural (e.g., attendees)
+                otherTable, // singular
+                otherTable.replace('_', '') // without underscore
+              ];
+              
+              let relatedEntities = null;
+              for (const key of relatedEntityKeys) {
+                if (row[key]) {
+                  relatedEntities = Array.isArray(row[key]) ? row[key] : [row[key]];
+                  break;
+                }
+              }
+              
+              if (!relatedEntities || relatedEntities.length === 0) {
+                return '';
+              }
+              
+              // Get the display field for the other entity
+              const displayField = getDefaultDisplayField(otherTable);
+              
+              // Extract and join names
+              const names = relatedEntities.map(entity => {
+                if (displayField === 'name' && !entity.name && entity.first_name) {
+                  // Special case for attendees
+                  return `${entity.first_name} ${entity.last_name || ''}`;
+                }
+                return entity[displayField] || '';
+              }).filter(Boolean);
+              
+              return names.join(', ');
+            } catch (error) {
+              console.error(`Error accessing reverse relationship for ${otherTable}:`, error);
+              return '';
+            }
+          }
+        });
       }
     });
     
@@ -220,6 +468,10 @@ export function useColumnManagement({
       header: field.label,
       accessorKey: field.accessorKey,
       accessorFn: field.accessorFn,
+      meta: {
+        isForeignKey: field.isForeignKey,
+        foreignTable: field.foreignTable
+      }
     }));
   };
   
@@ -258,8 +510,12 @@ export function useColumnManagement({
       let value = '';
       
       if (field.accessorFn) {
+
+        // Use the accessor function for all fields that have one
+        // This is crucial for relationship fields which need custom processing
         value = String(field.accessorFn(item) || '');
       } else if (field.accessorKey) {
+        // For direct properties (not relationships)
         value = String((item as any)[field.accessorKey] || '');
       }
       
