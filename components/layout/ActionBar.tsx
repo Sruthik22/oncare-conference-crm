@@ -310,7 +310,6 @@ export function ActionBar({
       const successfullyEnriched = enrichedData.filter(result => result.success)
       
       if (successfullyEnriched.length > 0 && onDefinitiveEnrichmentComplete) {
-        console.log('successfullyEnriched', successfullyEnriched);
         try {
           // Define the required columns with their types
           const requiredColumns = [
@@ -334,8 +333,6 @@ export function ActionBar({
           // For each successfully enriched health system, update it in the database
           for (const result of successfullyEnriched) {
             const { healthSystem } = result
-
-            console.log('healthSystem', healthSystem);
             
             // Update the health system in Supabase with all the fields
             const { error } = await supabase
@@ -360,6 +357,7 @@ export function ActionBar({
           }
           
           // Call the completion handler
+          // This triggers the parent component to update its state
           if (onDefinitiveEnrichmentComplete) {
             onDefinitiveEnrichmentComplete(enrichedData)
           }

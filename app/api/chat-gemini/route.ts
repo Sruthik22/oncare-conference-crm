@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { getAvailableFilters } from '../chat/utils';
 
 // Initialize Gemini API client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -12,38 +13,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid messages format' }, { status: 400 });
     }
 
+    // Get all available filters based on the active tab
+    const availableFilters = getAvailableFilters(activeTab);
+    
     // Prepare system message based on active tab
     let systemPrompt = '';
-    let availableFilters: string[] = [];
     
     switch (activeTab) {
       case 'attendees':
         systemPrompt = `You are an AI assistant that helps users search through attendee records.
-        Available properties to filter on include: first_name, last_name, email, phone, title, company.
-        Users may ask questions about attendees based on attributes like their organization, title, or other info.`;
-        availableFilters = [
-          'first_name', 'last_name', 'email', 'phone', 'title', 'company'
-        ];
+        Available properties to filter on include: ${availableFilters.join(', ')}.
+        Users may ask questions about attendees based on attributes like their name, email, organization, title, location, or other info.`;
         break;
       case 'health-systems':
         systemPrompt = `You are an AI assistant that helps users search through health system records.
-        Available properties to filter on include: name, city, state, website, revenue.
-        Users may ask questions about health systems based on location, size, revenue, etc.`;
-        availableFilters = [
-          'name', 'city', 'state', 'website', 'revenue'
-        ];
+        Available properties to filter on include: ${availableFilters.join(', ')}.
+        Users may ask questions about health systems based on name, location, revenue, website, etc.`;
         break;
       case 'conferences':
         systemPrompt = `You are an AI assistant that helps users search through conference records.
-        Available properties to filter on include: name, location, start_date, end_date.
-        Users may ask questions about conferences based on date, location, etc.`;
-        availableFilters = [
-          'name', 'location', 'start_date', 'end_date'
-        ];
+        Available properties to filter on include: ${availableFilters.join(', ')}.
+        Users may ask questions about conferences based on name, date, location, etc.`;
         break;
       default:
-        systemPrompt = `You are an AI assistant that helps users search through records.`;
-        availableFilters = [];
+        systemPrompt = `You are an AI assistant that helps users search through records.
+        Available properties to filter on include: ${availableFilters.join(', ')}.`;
     }
 
     systemPrompt += `\n\nWhen a user asks a question that appears to be a search query, you should:

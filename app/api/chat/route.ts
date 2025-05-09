@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-
-// TODO: we need to look into this and understand if this is the best way to apply a filter
+import { getAvailableFilters, generateSystemMessage } from './utils';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -16,54 +15,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid messages format' }, { status: 400 });
     }
 
-    // Prepare system message based on active tab
-    let systemMessage = '';
-    let availableFilters: string[] = [];
+    // Get all available filters based on the active tab
+    const availableFilters = getAvailableFilters(activeTab);
     
-    switch (activeTab) {
-      case 'attendees':
-        systemMessage = `You are an AI assistant that helps users search through attendee records.
-        Available properties to filter on include: first_name, last_name, email, phone, title, company.
-        Users may ask questions about attendees based on attributes like their organization, title, or other info.`;
-        availableFilters = [
-          'first_name', 'last_name', 'email', 'phone', 'title', 'company'
-        ];
-        break;
-      case 'health-systems':
-        systemMessage = `You are an AI assistant that helps users search through health system records.
-        Available properties to filter on include: name, city, state, website, revenue.
-        Users may ask questions about health systems based on location, size, revenue, etc.`;
-        availableFilters = [
-          'name', 'city', 'state', 'website', 'revenue'
-        ];
-        break;
-      case 'conferences':
-        systemMessage = `You are an AI assistant that helps users search through conference records.
-        Available properties to filter on include: name, location, start_date, end_date.
-        Users may ask questions about conferences based on date, location, etc.`;
-        availableFilters = [
-          'name', 'location', 'start_date', 'end_date'
-        ];
-        break;
-      default:
-        systemMessage = `You are an AI assistant that helps users search through records.`;
-        availableFilters = [];
-    }
-
-    systemMessage += `\n\nWhen a user asks a question that appears to be a search query, you should:
-    1. Parse their natural language query to determine the appropriate filters
-    2. Respond in a friendly way explaining how you're interpreting their query
-    3. Return a JSON object in the "filters" field with the appropriate filters to apply
-    
-    Use the following format for filters:
-    { 
-      id: string (unique id),
-      property: string (one of the available properties),
-      operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than',
-      value: string (the value to filter for)
-    }
-    
-    If the user's query doesn't seem to be a search/filter request, just respond conversationally and don't return any filters.`;
+    // Generate system message with all available filters
+    const systemMessage = generateSystemMessage(activeTab, availableFilters);
 
     // Add system message to conversation
     const fullMessages = [

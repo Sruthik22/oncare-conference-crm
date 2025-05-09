@@ -996,7 +996,11 @@ export default function Home() {
                 address: enrichedItem.healthSystem.address || hs.address,
                 city: enrichedItem.healthSystem.city || hs.city,
                 state: enrichedItem.healthSystem.state || hs.state,
-                zip: enrichedItem.healthSystem.zip || hs.zip
+                zip: enrichedItem.healthSystem.zip || hs.zip,
+                ambulatory_ehr: enrichedItem.healthSystem.ambulatory_ehr,
+                net_patient_revenue: enrichedItem.healthSystem.net_patient_revenue,
+                number_of_beds: enrichedItem.healthSystem.number_of_beds,
+                number_of_hospitals_in_network: enrichedItem.healthSystem.number_of_hospitals_in_network
               };
             }
             

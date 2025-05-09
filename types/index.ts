@@ -20,6 +20,10 @@ export interface HealthSystem {
   state?: string
   zip?: string
   created_at: string
+  ambulatory_ehr?: string
+  net_patient_revenue?: number
+  number_of_beds?: number
+  number_of_hospitals_in_network?: number
   attendees?: Array<{
     id: string
     first_name: string
