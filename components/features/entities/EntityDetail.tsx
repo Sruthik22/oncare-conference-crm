@@ -755,11 +755,12 @@ export const EntityDetail = ({
   // Tag selection dialog
   const TagSelectionDialog = () => {
     const tagDef = tags.find(t => t.key === isAddingTag);
+    const [newCertificationName, setNewCertificationName] = useState('');
+    
     if (!tagDef) return null;
     
     const items = availableTagItems[tagDef.key] || [];
     const isCertification = tagDef.key === 'certifications';
-    const [newCertificationName, setNewCertificationName] = useState('');
     
     // Handle certification input change
     const handleCertificationInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
