@@ -2,7 +2,7 @@ import { Fragment } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import type { Attendee, Conference, HealthSystem } from '@/types'
-import { EntityDeleteResult } from './EntityDetail'
+import { EntityDeleteResult } from '@/components/features/entities/EntityDetail'
 
 // Existing specific result types for backward compatibility
 export interface AttendeeDeleteResult {
