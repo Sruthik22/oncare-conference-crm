@@ -15,6 +15,7 @@ export interface AIEnrichmentRequest {
   columnName: string;
   columnType: string;
   getFieldsForAllColumns?: (item: any) => Array<{ id: string, label: string, value: string, iconName: string }>;
+  includeDefinitiveData?: boolean;
 }
 
 /**
@@ -90,7 +91,8 @@ export class AIService {
     promptTemplate: string, 
     columnName: string, 
     columnType: string, 
-    getFieldsForAllColumns?: (item: any) => Array<{ id: string, label: string, value: string, iconName: string }>
+    getFieldsForAllColumns?: (item: any) => Array<{ id: string, label: string, value: string, iconName: string }>,
+    includeDefinitiveData?: boolean
   ): Promise<any> {
     try {
       const response = await this.client.post('/test-prompt', {
@@ -98,7 +100,8 @@ export class AIService {
         promptTemplate,
         columnName,
         columnType,
-        getFieldsForAllColumns
+        getFieldsForAllColumns,
+        includeDefinitiveData
       });
       
       return response.data;

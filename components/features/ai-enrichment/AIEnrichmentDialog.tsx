@@ -3,12 +3,14 @@ import { Dialog, Transition } from '@headlessui/react'
 import { XMarkIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
 import { aiService } from '@/lib/ai'
+import { definitiveService } from '@/lib/definitive'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
 import type { IconName } from '@/hooks/useColumnManagement'
 import { getColumnIconName } from '@/hooks/useColumnManagement'
 import { Icon } from '@/components/ui/Icon'
 import { getIconComponent } from '@/utils/iconUtils'
+import { Switch } from '@headlessui/react'
 
 // TODO: get icon path from iconUtils
 // Helper function to get icon SVG path based on icon name
@@ -82,6 +84,9 @@ export function AIEnrichmentDialog({
     node: Node | null;
     offset: number;
   }>({ node: null, offset: 0 });
+  const [includeDefinitiveData, setIncludeDefinitiveData] = useState(false)
+  const [isLoadingDefinitiveData, setIsLoadingDefinitiveData] = useState(false)
+  const [definitiveDataSummary, setDefinitiveDataSummary] = useState<string>("")
   
   const editorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -626,6 +631,30 @@ export function AIEnrichmentDialog({
     return null;
   };
 
+  // Handle fetching Definitive data summary when toggle is enabled
+  useEffect(() => {
+    if (includeDefinitiveData) {
+      fetchDefinitiveDataSummary();
+    }
+  }, [includeDefinitiveData]);
+
+  // Fetch a summary of available Definitive data
+  const fetchDefinitiveDataSummary = async () => {
+    if (!includeDefinitiveData) return;
+    
+    try {
+      setIsLoadingDefinitiveData(true);
+      // Get a count or summary of the available health systems
+      const healthSystems = await definitiveService.getAllHealthSystems();
+      setDefinitiveDataSummary(`${healthSystems.length} health systems available from Definitive Healthcare`);
+    } catch (error) {
+      console.error('Error fetching Definitive data summary:', error);
+      setDefinitiveDataSummary('Unable to load Definitive Healthcare data');
+    } finally {
+      setIsLoadingDefinitiveData(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     
@@ -653,7 +682,8 @@ export function AIEnrichmentDialog({
         promptTemplate,
         columnName,
         columnType,
-        getFieldsForAllColumns: fields
+        getFieldsForAllColumns: fields,
+        includeDefinitiveData: includeDefinitiveData
       })
       
       // Pass the results to the parent component
@@ -698,7 +728,8 @@ export function AIEnrichmentDialog({
         promptTemplate,
         columnName,
         columnType,
-        fields
+        fields,
+        includeDefinitiveData
       )
       
       setTestResult(result)
@@ -713,6 +744,11 @@ export function AIEnrichmentDialog({
   const closeButtonIcon = <XMarkIcon className="h-6 w-6" aria-hidden="true" />
   const processIcon = <ArrowPathIcon className="animate-spin -ml-0.5 mr-2 h-4 w-4" />
   const sendIcon = <PaperAirplaneIcon className="-ml-0.5 mr-2 h-4 w-4" />
+
+  // Function to classify switch state
+  function classNames(...classes: string[]) {
+    return classes.filter(Boolean).join(' ')
+  }
 
   return (
     <Transition.Root show={isOpen} as={Fragment}>
@@ -811,6 +847,43 @@ export function AIEnrichmentDialog({
                               </svg>
                             </div>
                           </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between">
+                            <span className="flex flex-grow items-center">
+                              <span className="text-sm font-medium text-gray-700">Include Definitive Healthcare Data</span>
+                              <span className="ml-2 text-xs text-gray-500">
+                                {isLoadingDefinitiveData 
+                                  ? "Loading..." 
+                                  : includeDefinitiveData && definitiveDataSummary 
+                                  ? definitiveDataSummary 
+                                  : "Enhance matching with the Definitive Healthcare database"}
+                              </span>
+                            </span>
+                            <Switch
+                              checked={includeDefinitiveData}
+                              onChange={setIncludeDefinitiveData}
+                              className={classNames(
+                                includeDefinitiveData ? 'bg-indigo-600' : 'bg-gray-200',
+                                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2'
+                              )}
+                            >
+                              <span className="sr-only">Use Definitive Healthcare data</span>
+                              <span
+                                aria-hidden="true"
+                                className={classNames(
+                                  includeDefinitiveData ? 'translate-x-5' : 'translate-x-0',
+                                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out'
+                                )}
+                              />
+                            </Switch>
+                          </div>
+                          {includeDefinitiveData && (
+                            <p className="mt-1 text-xs text-blue-600">
+                              Your AI enrichment will include data from Definitive Healthcare to improve matching accuracy.
+                            </p>
+                          )}
                         </div>
                         
                         <div className="mb-4">

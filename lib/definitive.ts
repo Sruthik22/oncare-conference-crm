@@ -129,7 +129,6 @@ export class DefinitiveService {
         endpoint: 'odata-v4/Hospitals',
         method: 'GET',
         params: {
-          '$top': 7000, // Adjust based on API limits
           '$orderby': 'Name asc'
         }
       });
