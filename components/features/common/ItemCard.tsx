@@ -78,15 +78,8 @@ export function ItemCard({
     }
     
     // Date fields
-    if (label.toLowerCase().includes('date') || 
-        value.match(/^\d{4}-\d{2}-\d{2}/) ||
-        value.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-      try {
-        return <span className="text-gray-900 ml-2">{new Date(value).toLocaleDateString()}</span>;
-      } catch (e) {
-        // If date parsing fails, just display the original value
-        return <span className="text-gray-900 ml-2">{value}</span>;
-      }
+    if (label.toLowerCase().includes('date')) {
+      return <span className="text-gray-900 ml-2">{value}</span>;
     }
     
     // Default display

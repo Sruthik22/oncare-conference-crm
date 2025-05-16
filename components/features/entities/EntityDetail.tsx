@@ -1260,6 +1260,7 @@ export const EntityDetail = ({
       </div>
       
       <div className="px-6 py-5 divide-y divide-gray-200">
+        {/* First render the defined fields */}
         {fields.map((field, index) => {
           // Get field value 
           const value = (entity as any)[field.key];
@@ -1298,29 +1299,8 @@ export const EntityDetail = ({
             </div>
           );
         })}
-        
-        {/* Auto-render any other entity properties */}
-        {Object.entries(entity).map(([key, value]) => {
-          if (fields.find(f => f.key === key)) return null;
-          return (
-            <div key={key} className="grid grid-cols-3 gap-4 py-4">
-              <div className="col-span-1 flex items-center">
-                <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
-                <span className="text-sm font-medium text-gray-500">{toLabel(key)}</span>
-              </div>
-              <div className="col-span-2 text-sm">
-                {typeof value === 'object' ? (
-                  <div className="bg-gray-50 p-3 rounded-md">
-                    <p className="whitespace-pre-line text-gray-700">{JSON.stringify(value, null, 2)}</p>
-                  </div>
-                ) : (
-                  <span className="text-gray-900">{String(value)}</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
 
+        {/* Then render the tags */}
         {tags.map((tagDef, tagIdx) => {
           const items = tagDef.getItems(entity);
           
@@ -1373,6 +1353,37 @@ export const EntityDetail = ({
             </div>
           );
         })}
+
+        {/* Finally, render any additional fields that weren't explicitly defined */}
+        {Object.entries(entity)
+          .filter(([key]) => {
+            // Skip fields that are already defined in the fields array
+            const isDefinedField = fields.some(f => f.key === key);
+            // Skip fields that are used in tags
+            const isTagField = tags.some(t => t.key === key);
+            // Skip common fields that we don't want to show
+            const isCommonField = ['id', 'created_at', 'updated_at'].includes(key);
+            return !isDefinedField && !isTagField && !isCommonField;
+          })
+          .map(([key, value]) => (
+            <div key={key} className="grid grid-cols-3 gap-4 py-4">
+              <div className="col-span-1 flex items-center">
+                <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
+                <span className="text-sm font-medium text-gray-500">{toLabel(key)}</span>
+              </div>
+              <div className="col-span-2 text-sm">
+                {typeof value === 'object' ? (
+                  <div className="bg-gray-50 p-3 rounded-md">
+                    <pre className="whitespace-pre-wrap text-gray-700 text-sm overflow-x-auto">
+                      {JSON.stringify(value, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <span className="text-gray-900">{String(value)}</span>
+                )}
+              </div>
+            </div>
+          ))}
       </div>
       
       {/* Add Apollo Integration section if needed */}

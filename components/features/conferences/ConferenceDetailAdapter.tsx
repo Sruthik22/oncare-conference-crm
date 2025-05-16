@@ -120,9 +120,12 @@ export const ConferenceDetailAdapter = ({
       },
       getLabel: (item) => {
         // Each item is an AttendeeConference which has an attendee property
-        const attendee = item.attendee;
+        const attendee = item.attendees;
         if (attendee) {
-          return `${attendee.first_name} ${attendee.last_name}`;
+          // Otherwise combine first and last name
+          const firstName = attendee.first_name || '';
+          const lastName = attendee.last_name || '';
+          return `${firstName} ${lastName}`.trim() || 'Unknown Attendee';
         }
         return 'Unknown Attendee';
       },

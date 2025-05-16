@@ -216,7 +216,21 @@ export function useColumnManagement({
           label: 'Date',
           iconName: getColumnIconName('date'),
           accessorFn: (row: any) => {
-            return `${row.start_date} - ${row.end_date}`;
+            const formatDate = (dateStr: string) => {
+              const date = new Date(dateStr);
+              return date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+              });
+            };
+            
+            if (row.start_date && row.end_date) {
+              const startDate = formatDate(row.start_date);
+              const endDate = formatDate(row.end_date);
+              return `${startDate} - ${endDate}`;
+            }
+            return row.start_date ? formatDate(row.start_date) : '';
           },
           dataType: 'date'
         });
