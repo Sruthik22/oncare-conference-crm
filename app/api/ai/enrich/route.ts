@@ -7,6 +7,15 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Helper function to chunk array into batches
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}
+
 export async function POST(request: Request) {
   try {
     const { items, promptTemplate, columnName, columnType, getFieldsForAllColumns, includeDefinitiveData } = await request.json();
@@ -41,11 +50,11 @@ export async function POST(request: Request) {
       }
     }
 
-    // Process each item with AI
-    const results = [];
+    // Prepare all items with their resolved prompts first
+    const preparedItems = [];
     for (const item of items) {
       try {
-        // Generate a prompt from the template by replacing variables
+        // Generate a prompt from the template by replacing variables (keep existing logic)
         let prompt = promptTemplate;
         
         // Replace all occurrences of variables in the format {{variableName}}
@@ -59,267 +68,314 @@ export async function POST(request: Request) {
           fieldsData.map((field: { id: string, value: string }) => [field.id.toLowerCase(), field.value])
         );
         
-        // Replace variables using the field map
+        // Replace variables using the field map (keep existing logic)
         prompt = prompt.replace(variableRegex, (_, variableName) => {
           const key = variableName.toLowerCase();
           // Try to get the value from fieldMap first, fall back to direct property access
           return fieldMap.get(key) || item[variableName] || '';
         });
 
-        // Add instructions based on column type
-        let instructions = '';
-        if (columnType === 'boolean') {
-          instructions = 'Respond with only "yes" or "no".';
-        } else if (columnType === 'number') {
-          instructions = 'Respond with only a single number.';
-        } else if (columnType === 'text') {
-          instructions = 'Provide a concise, informative response.';
-        }
+        // Add to prepared items
+        preparedItems.push({
+          id: item.id,
+          prompt: prompt,
+          originalItem: item
+        });
+      } catch (error) {
+        console.error(`Error preparing item ${item.id}:`, error);
+        // If an item fails preparation, still add it to results as failed
+        preparedItems.push({
+          id: item.id,
+          error: error instanceof Error ? error.message : 'Error preparing item',
+          originalItem: item
+        });
+      }
+    }
 
-        // Handle processing with or without Definitive data
-        let finalResponse;
+    // Filter out items that failed preparation
+    const validItems = preparedItems.filter(item => !item.error);
+    const failedItems = preparedItems.filter(item => item.error);
 
+    // Initialize results array with failed items
+    const results: Array<{
+      item: any;
+      success: boolean;
+      error?: string;
+      enrichedData?: Record<string, any>;
+    }> = failedItems.map(item => ({
+      item: item.originalItem,
+      success: false,
+      error: item.error
+    }));
+
+    // Add instructions based on column type for system message
+    let instructions = '';
+    if (columnType === 'boolean') {
+      instructions = 'Respond with only "yes" or "no".';
+    } else if (columnType === 'number') {
+      instructions = 'Respond with only a single number.';
+    } else if (columnType === 'text') {
+      instructions = 'Provide a concise, informative response.';
+    }
+
+    // Process in batches of 15 items
+    const batchSize = 15;
+    const batches = chunkArray(validItems, batchSize);
+    
+    for (const batch of batches) {
+      try {
+        // For each batch, create a multi-part prompt for the model
+        const batchPrompt = batch.map((item, i) => `Item ${i+1} (ID: ${item.id}):\n${item.prompt}`).join('\n\n---\n\n');
+        
+        // Initial model - use gpt-3.5-turbo to save on costs
+        const systemPrompt = `You are an AI assistant helping to enrich data. ${instructions}
+Answer each of the following ${batch.length} items independently.
+For each item, provide only the answer with no explanation or reasoning.
+Always start your response to each item with "Item X (ID: [id]): " followed immediately by your answer.
+Keep your answers as concise as possible.`;
+
+        let definitiveSystemContent = '';
         if (includeDefinitiveData && definitiveNames.length > 0) {
-          // First get the item name as a fallback
-          const itemName = fieldMap.get('name') || item.name || '';
+          // For each batch item, try to find matches in Definitive data
+          // First, extract potential organization names from the prompts
+          const batchPromptForExtraction = batch.map((item, i) => 
+            `Item ${i+1} (ID: ${item.id}):\nExtract company/organization names from: ${item.prompt}`
+          ).join('\n\n---\n\n');
           
-          // Extract potential matching terms from the prompt
-          // This allows users to explicitly specify what to match in their prompts
-          const extractionMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            {
-              role: 'system',
-              content: `You are an extraction assistant. Extract the name of the health system, hospital, or healthcare organization that needs to be matched against a definitive database. Return ONLY the name with no additional text or explanation. If multiple names are mentioned, list each one on a separate line. If no organization name is mentioned, respond with "NO_EXTRACTION_POSSIBLE".`
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ];
-          
-          // Call OpenAI API to extract matching terms
-          const extractionResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: extractionMessages,
-            max_tokens: 100,
-            temperature: 0.1,
-          });
-          
-          // Get the extraction result
-          const extractionResult = extractionResponse.choices[0]?.message?.content?.trim() || '';
-          
-          // Use the extraction result if available, otherwise fall back to item name
-          const searchTerms = extractionResult !== 'NO_EXTRACTION_POSSIBLE' ? 
-            extractionResult.split('\n').filter(Boolean) : 
-            (itemName ? [itemName] : []);
-          
-          if (searchTerms.length > 0) {
-            // For each search term, check for matches
-            let allMatchedNames: string[] = [];
-            
-            for (const searchTerm of searchTerms) {
-              // STEP 1: Ask the AI to check if the term matches any health system name
-              const matchMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-                {
-                  role: 'system',
-                  content: `You are a health system matching assistant. You have access to a database of health system names. Your task is to check if the provided health system name matches or is similar to any names in our database. IMPORTANT: Only return exact matches or very close matches. Don't return weak or questionable matches.`
+          // Extract organization names using a separate API call
+          try {
+            const extractionResponse = await openai.chat.completions.create({
+              model: 'gpt-3.5-turbo',
+              messages: [
+                { 
+                  role: 'system', 
+                  content: `You are an extraction assistant. For each item, extract the name of any health system, hospital, or healthcare organization mentioned. 
+Return ONLY the extracted name for each item with no additional text or explanation. If multiple names are mentioned, return the most prominent one. 
+If no organization name is mentioned, respond with "NO_EXTRACTION_POSSIBLE".
+Always start your response with "Item X (ID: [id]): " followed by the extracted name.` 
                 },
-                {
-                  role: 'user',
-                  content: `Check if "${searchTerm}" matches or is very similar to any of the following health system names. If you find a match, respond ONLY with the matching name from the list, exactly as written. If there are multiple matches, list each one on a new line. If there are no matches, respond with "NO_MATCH".
-
-Here is the full list of health system names to check against:
-${definitiveNames.join('\n')}`
-                }
-              ];
-
-              // Call OpenAI API for the match check
-              const matchResponse = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: matchMessages,
-                max_tokens: 100,
-                temperature: 0.1, // Keep it focused and precise
-              });
-
-              // Extract the match response
-              const matchResult = matchResponse.choices[0]?.message?.content?.trim() || '';
+                { role: 'user', content: batchPromptForExtraction }
+              ],
+              temperature: 0.1,
+              max_tokens: 500,
+            });
+            
+            const extractionContent = extractionResponse.choices[0].message.content || '';
+            const extractRegex = /Item (\d+) \(ID: ([^)]+)\):\s*([\s\S]*?)(?=(?:Item \d+|$)|$)/g;
+            
+            // Process matches to find health systems
+            const matchedSystems = [];
+            let extractMatch;
+            
+            while ((extractMatch = extractRegex.exec(extractionContent + "\n")) !== null) {
+              const [_, itemNum, itemId, extractedName] = extractMatch;
               
-              // If we found matches, add them to our list
-              if (matchResult && matchResult !== 'NO_MATCH') {
-                const matchedTerms = matchResult.split('\n').map(name => name.trim()).filter(Boolean);
-                allMatchedNames = [...allMatchedNames, ...matchedTerms];
+              if (extractedName && extractedName.trim() !== "NO_EXTRACTION_POSSIBLE") {
+                // For each extracted name, look for matches in Definitive data
+                const searchTerm = extractedName.trim();
+                
+                // Look for exact matches first
+                let matches = definitiveData.filter(
+                  system => system.Name.toLowerCase() === searchTerm.toLowerCase()
+                );
+                
+                // If no exact matches, try contains matching
+                if (matches.length === 0) {
+                  matches = definitiveData.filter(
+                    system => system.Name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                    searchTerm.toLowerCase().includes(system.Name.toLowerCase())
+                  );
+                }
+                
+                if (matches.length > 0) {
+                  // Limit to first 2 matches to avoid overwhelming the context
+                  for (const match of matches.slice(0, 2)) {
+                    matchedSystems.push({
+                      itemId,
+                      system: match
+                    });
+                  }
+                }
               }
             }
             
-            // Remove duplicates
-            allMatchedNames = allMatchedNames.filter((name, index, self) => 
-              self.indexOf(name) === index
-            );
-            
-            // If we found matches, proceed with the second API call
-            if (allMatchedNames.length > 0) {
-              // Find the matched systems in our data
-              const matchedSystems = definitiveData.filter(system => 
-                allMatchedNames.some(name => system.Name === name)
-              );
+            // If we found matches, create a detailed system content
+            if (matchedSystems.length > 0) {
+              definitiveSystemContent = `You have access to healthcare system data from Definitive Healthcare. Here is information about specific health systems relevant to these items:\n\n`;
               
-              if (matchedSystems.length > 0) {
-                // STEP 2: Second API call with the full context of matched systems
-                const detailMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-                  {
-                    role: 'system',
-                    content: `You are an AI assistant helping to enrich data. ${instructions}`
-                  },
-                  {
-                    role: 'system',
-                    content: `I found these detailed matches in the Definitive Healthcare database:
-${matchedSystems.map((match, index) => `
-Match ${index + 1}: ${match.Name}
-- Type: ${match.FirmType || 'Unknown'}
-- EMR Vendor (Ambulatory): ${match.EMRVendorAmbulatory || 'Unknown'}
-- EMR Vendor (Inpatient): ${match.EMRVendorInpatient || 'Unknown'}
-- Net Patient Revenue: ${match.NetPatientRev ? '$' + match.NetPatientRev.toLocaleString() : 'Unknown'}
-- Number of Beds: ${match.NumBeds || 'Unknown'}
-- Number of Hospitals: ${match.NumHospitals || 'Unknown'}
-- Website: ${match.WebSite || 'Unknown'}
-- Location: ${[match.HQCity, match.State].filter(Boolean).join(', ') || 'Unknown'}
-`).join('\n')}
-
-Use this information to help answer the question. Don't explicitly mention that you're using Definitive Healthcare data in your response.`
-                  },
-                  {
-                    role: 'user',
-                    content: prompt
-                  }
-                ];
-
-                // Call OpenAI API with the detailed context
-                const detailResponse = await openai.chat.completions.create({
-                  model: 'gpt-4o-mini-search-preview',
-                  messages: detailMessages,
-                  max_tokens: 200,
-                });
-
-                finalResponse = detailResponse.choices[0]?.message?.content?.trim() || '';
-              } else {
-                // We got match names but couldn't find them in our data (shouldn't happen)
-                console.warn(`Found matches ${allMatchedNames.join(', ')} but couldn't find them in definitiveData`);
+              // Group matches by item ID for clarity
+              const systemsByItem: Record<string, DefinitiveHospital[]> = {};
+              for (const match of matchedSystems) {
+                if (!systemsByItem[match.itemId]) {
+                  systemsByItem[match.itemId] = [];
+                }
+                systemsByItem[match.itemId].push(match.system);
+              }
+              
+              // Create detailed content
+              for (const [itemId, systems] of Object.entries(systemsByItem) as [string, DefinitiveHospital[]][]) {
+                definitiveSystemContent += `For item ID ${itemId}:\n`;
                 
-                // Fall back to the regular API call without Definitive data
-                const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-                  {
-                    role: 'system',
-                    content: `You are an AI assistant helping to enrich data. ${instructions}`
-                  },
-                  {
-                    role: 'user',
-                    content: prompt
-                  }
-                ];
+                for (const system of systems) {
+                  definitiveSystemContent += `- ${system.Name}\n`;
+                  definitiveSystemContent += `  - Type: ${system.FirmType || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - EMR Vendor (Ambulatory): ${system.EMRVendorAmbulatory || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - EMR Vendor (Inpatient): ${system.EMRVendorInpatient || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - Net Patient Revenue: ${system.NetPatientRev ? '$' + system.NetPatientRev.toLocaleString() : 'Unknown'}\n`;
+                  definitiveSystemContent += `  - Number of Beds: ${system.NumBeds || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - Number of Hospitals: ${system.NumHospitals || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - Website: ${system.WebSite || 'Unknown'}\n`;
+                  definitiveSystemContent += `  - Location: ${[system.HQCity, system.State].filter(Boolean).join(', ') || 'Unknown'}\n\n`;
+                }
+              }
+              
+              definitiveSystemContent += `Use this information to help with your classifications. Don't explicitly mention that you're using Definitive Healthcare data in your response.`;
+            } else {
+              // No matches found
+              definitiveSystemContent = `You checked a database of ${definitiveNames.length} health systems and did not find any matches for the organizations mentioned. Please use your general knowledge to answer the questions.`;
+            }
+          } catch (extractError) {
+            console.error('Error extracting organization names:', extractError);
+            // Fallback to generic context
+            definitiveSystemContent = `You have access to healthcare system data. Consider healthcare-specific factors when analyzing these items.`;
+          }
+        }
 
-                const regularResponse = await openai.chat.completions.create({
-                  model: 'gpt-4o-mini-search-preview',
-                  messages: regularMessages,
-                  max_tokens: 200,
-                });
+        // First pass with gpt-3.5-turbo (cheaper)
+        const gpt35Response = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { role: 'system', content: systemPrompt + definitiveSystemContent },
+            { role: 'user', content: batchPrompt }
+          ],
+          temperature: 0,
+          max_tokens: 1024,
+        });
 
-                finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
+        const gpt35Content = gpt35Response.choices[0].message.content || '';
+
+        // Parse responses from GPT-3.5
+        const responseRegex = /Item (\d+) \(ID: ([^)]+)\):\s*([\s\S]*?)(?=(?:Item \d+|$)|$)/g;
+        const gpt35Results = [];
+        const ambiguousItems = [];
+        let match;
+
+        while ((match = responseRegex.exec(gpt35Content + "\n")) !== null) {
+          const [_, itemNum, itemId, itemResponse] = match;
+          const originalBatchItem = batch.find(item => item.id === itemId);
+          
+          if (!originalBatchItem) continue;
+
+          // Check if the response is ambiguous (for boolean type)
+          let isAmbiguous = false;
+          if (columnType === 'boolean') {
+            const cleanResponse = itemResponse.trim().toLowerCase();
+            if (cleanResponse !== 'yes' && cleanResponse !== 'no') {
+              isAmbiguous = true;
+              ambiguousItems.push(originalBatchItem);
+            }
+          }
+
+          if (!isAmbiguous) {
+            gpt35Results.push({
+              id: itemId,
+              response: itemResponse.trim(),
+              originalItem: originalBatchItem.originalItem
+            });
+          }
+        }
+
+        // Process any ambiguous items with gpt-4o (higher quality, but more expensive)
+        if (ambiguousItems.length > 0) {
+          console.log(`Processing ${ambiguousItems.length} ambiguous items with gpt-4o`);
+          const ambiguousPrompt = ambiguousItems.map((item, i) => `Item ${i+1} (ID: ${item.id}):\n${item.prompt}`).join('\n\n---\n\n');
+          
+          const gpt4oResponse = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [
+              { role: 'system', content: systemPrompt + definitiveSystemContent },
+              { role: 'user', content: ambiguousPrompt }
+            ],
+            temperature: 0,
+            max_tokens: 1024,
+          });
+
+          const gpt4oContent = gpt4oResponse.choices[0].message.content || '';
+
+          // Parse responses from GPT-4o
+          let fallbackMatch;
+          const fallbackRegex = /Item (\d+) \(ID: ([^)]+)\):\s*([\s\S]*?)(?=(?:Item \d+|$)|$)/g;
+
+          while ((fallbackMatch = fallbackRegex.exec(gpt4oContent + "\n")) !== null) {
+            const [_, itemNum, itemId, itemResponse] = fallbackMatch;
+            const originalBatchItem = ambiguousItems.find(item => item.id === itemId);
+            
+            if (originalBatchItem) {
+              // Add GPT-4o result
+              gpt35Results.push({
+                id: itemId,
+                response: itemResponse.trim(),
+                originalItem: originalBatchItem.originalItem,
+                source: 'gpt-4o' // Mark this as coming from the fallback model
+              });
+            }
+          }
+        }
+
+        // Process and add all results from this batch
+        for (const result of gpt35Results) {
+          try {
+            // Process response based on column type
+            let processedResponse;
+            if (columnType === 'boolean') {
+              processedResponse = result.response.toLowerCase() === 'yes';
+            } else if (columnType === 'number') {
+              processedResponse = parseFloat(result.response);
+              if (isNaN(processedResponse)) {
+                throw new Error('AI did not return a valid number');
               }
             } else {
-              // No match found, use regular processing but tell the AI we checked
-              const noMatchMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-                {
-                  role: 'system',
-                  content: `You are an AI assistant helping to enrich data. ${instructions}`
-                },
-                {
-                  role: 'system',
-                  content: `I checked our Definitive Healthcare database of ${definitiveNames.length} health systems and did not find any matches for the organizations mentioned in your query. Please use your general knowledge to answer the question.`
-                },
-                {
-                  role: 'user',
-                  content: prompt
-                }
-              ];
-
-              const noMatchResponse = await openai.chat.completions.create({
-                model: 'gpt-4o-mini-search-preview',
-                messages: noMatchMessages,
-                max_tokens: 200,
-              });
-
-              finalResponse = noMatchResponse.choices[0]?.message?.content?.trim() || '';
+              processedResponse = result.response;
             }
-          } else {
-            // No terms to search with, use regular processing
-            const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-              {
-                role: 'system',
-                content: `You are an AI assistant helping to enrich data. ${instructions}`
-              },
-              {
-                role: 'user',
-                content: prompt
+
+            // Add to results
+            results.push({
+              item: result.originalItem,
+              success: true,
+              enrichedData: {
+                [columnName]: processedResponse,
+                _source: result.source || 'gpt-3.5-turbo' // Track which model provided this result
               }
-            ];
-
-            const regularResponse = await openai.chat.completions.create({
-              model: 'gpt-4o-mini-search-preview',
-              messages: regularMessages,
-              max_tokens: 200,
             });
-
-            finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
+          } catch (error) {
+            results.push({
+              item: result.originalItem,
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error processing response'
+            });
           }
-        } else {
-          // Regular processing without Definitive data
-          const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            {
-              role: 'system',
-              content: `You are an AI assistant helping to enrich data. ${instructions}`
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ];
+        }
 
-          const regularResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini-search-preview',
-            messages: regularMessages,
-            max_tokens: 200,
+        // Check for any missing items in this batch and mark them as failed
+        for (const batchItem of batch) {
+          if (!gpt35Results.some(result => result.id === batchItem.id)) {
+            results.push({
+              item: batchItem.originalItem,
+              success: false,
+              error: 'Failed to get a response from AI'
+            });
+          }
+        }
+      } catch (batchError) {
+        console.error('Error processing batch:', batchError);
+        // If a batch fails, mark all items in the batch as failed
+        for (const batchItem of batch) {
+          results.push({
+            item: batchItem.originalItem,
+            success: false,
+            error: batchError instanceof Error ? batchError.message : 'Batch processing error'
           });
-
-          finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
         }
-        
-        // Process response based on column type
-        let processedResponse;
-        if (columnType === 'boolean') {
-          processedResponse = finalResponse.toLowerCase() === 'yes';
-        } else if (columnType === 'number') {
-          processedResponse = parseFloat(finalResponse);
-          if (isNaN(processedResponse)) {
-            throw new Error('AI did not return a valid number');
-          }
-        } else {
-          processedResponse = finalResponse;
-        }
-
-        // Add to results
-        results.push({
-          item,
-          success: true,
-          enrichedData: {
-            [columnName]: processedResponse
-          }
-        });
-      } catch (itemError) {
-        console.error('Error processing item:', itemError);
-        results.push({
-          item,
-          success: false,
-          error: itemError instanceof Error ? itemError.message : 'Unknown error occurred'
-        });
       }
     }
 

@@ -61,6 +61,15 @@ interface AIEnrichmentDialogProps {
   getFieldsForAllColumns?: (item: Attendee | HealthSystem | Conference) => { id: string, label: string, value: string, iconName: IconName }[]
 }
 
+// Add batching utility
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}
+
 export function AIEnrichmentDialog({ 
   isOpen, 
   onClose, 
@@ -87,6 +96,9 @@ export function AIEnrichmentDialog({
   const [includeDefinitiveData, setIncludeDefinitiveData] = useState(false)
   const [isLoadingDefinitiveData, setIsLoadingDefinitiveData] = useState(false)
   const [definitiveDataSummary, setDefinitiveDataSummary] = useState<string>("")
+  const [progress, setProgress] = useState(0); // Progress for batches
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   
   const editorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -657,45 +669,50 @@ export function AIEnrichmentDialog({
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    
     try {
       setIsEnriching(true)
       setError(null)
-      
+      setProgress(0)
+      setCancelRequested(false)
       if (!columnName.trim()) {
         setError('Please enter a column name')
         return
       }
-      
       const promptTemplate = getPromptTemplate();
-      
       if (!promptTemplate.trim()) {
         setError('Please enter a prompt template')
         return
       }
-      
-      // Call AI service to perform enrichment with proper typing
-      const fields = getFieldsForAllColumns;
-      
-      const results = await aiService.enrichItems({
-        items,
-        promptTemplate,
-        columnName,
-        columnType,
-        getFieldsForAllColumns: fields,
-        includeDefinitiveData: includeDefinitiveData
-      })
-      
-      // Pass the results to the parent component
-      onEnrichmentComplete(results, columnName)
-      
-      // Close the dialog
+      // Batching logic
+      const batchSize = 20; // Adjust as needed
+      const batches = chunkArray(items, batchSize);
+      let allResults: any[] = [];
+      for (let i = 0; i < batches.length; i++) {
+        if (cancelRequested) {
+          setError('Enrichment cancelled by user.');
+          break;
+        }
+        const batch = batches[i];
+        const results = await aiService.enrichItems({
+          items: batch,
+          promptTemplate,
+          columnName,
+          columnType,
+          getFieldsForAllColumns,
+          includeDefinitiveData
+        });
+        allResults = allResults.concat(results);
+        setProgress((i + 1) / batches.length);
+      }
+      onEnrichmentComplete(allResults, columnName)
       onClose()
     } catch (err) {
       console.error('AI enrichment error:', err)
       setError(err instanceof Error ? err.message : 'An error occurred during enrichment')
     } finally {
       setIsEnriching(false)
+      setCancelRequested(false)
+      setShowCancelConfirm(false)
     }
   }
 
@@ -740,6 +757,24 @@ export function AIEnrichmentDialog({
       setIsTesting(false)
     }
   }
+
+  // Handle cancel button click
+  const handleCancelClick = () => {
+    if (isEnriching) {
+      setShowCancelConfirm(true);
+    } else {
+      onClose();
+    }
+  };
+
+  const handleConfirmCancel = () => {
+    setCancelRequested(true);
+    setShowCancelConfirm(false);
+  };
+
+  const handleCancelDialogClose = () => {
+    setShowCancelConfirm(false);
+  };
 
   const closeButtonIcon = <XMarkIcon className="h-6 w-6" aria-hidden="true" />
   const processIcon = <ArrowPathIcon className="animate-spin -ml-0.5 mr-2 h-4 w-4" />
@@ -1001,6 +1036,20 @@ export function AIEnrichmentDialog({
                           </div>
                         )}
                         
+                        {isEnriching && (
+                          <div className="mb-4">
+                            <div className="w-full bg-gray-200 rounded-full h-2.5">
+                              <div
+                                className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round(progress * 100)}%` }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1 text-center">
+                              {Math.round(progress * 100)}% complete
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse space-x-3 space-x-reverse">
                           <button
                             type="submit"
@@ -1020,7 +1069,7 @@ export function AIEnrichmentDialog({
                           <button
                             type="button"
                             onClick={handleTestPrompt}
-                            disabled={isTesting || !items.length}
+                            disabled={isTesting || !items.length || isEnriching}
                             className="inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                           >
                             {isTesting ? (
@@ -1038,8 +1087,8 @@ export function AIEnrichmentDialog({
                           
                           <button
                             type="button"
-                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
-                            onClick={onClose}
+                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                            onClick={handleCancelClick}
                           >
                             Cancel
                           </button>
@@ -1048,6 +1097,29 @@ export function AIEnrichmentDialog({
                     )}
                   </div>
                 </div>
+                {/* Cancel confirmation modal */}
+                {showCancelConfirm && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+                    <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full">
+                      <h3 className="text-lg font-semibold mb-2">Cancel Enrichment?</h3>
+                      <p className="mb-4 text-gray-700">Are you sure you want to cancel the enrichment process? Progress will be lost.</p>
+                      <div className="flex justify-end space-x-2">
+                        <button
+                          className="px-4 py-2 rounded bg-gray-200 text-gray-800 hover:bg-gray-300"
+                          onClick={handleCancelDialogClose}
+                        >
+                          No, keep running
+                        </button>
+                        <button
+                          className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700"
+                          onClick={handleConfirmCancel}
+                        >
+                          Yes, cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </Dialog.Panel>
             </Transition.Child>
           </div>

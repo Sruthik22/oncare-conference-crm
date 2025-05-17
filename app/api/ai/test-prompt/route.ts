@@ -72,230 +72,130 @@ export async function POST(request: Request) {
       instructions = 'Provide a concise, informative response.';
     }
 
-    // Handle processing with or without Definitive data
-    let finalResponse;
-    let matchInfo = "";
+    // Create a system prompt similar to the enrich endpoint
+    let systemPrompt = `You are an AI assistant helping to enrich data. ${instructions}
+Provide only the answer with no explanation or reasoning.
+Keep your answer as concise as possible.`;
 
+    let definitiveSystemContent = '';
+    let matchInfo = '';
+    
+    // Handle Definitive data in the same way as enrich endpoint
     if (includeDefinitiveData && definitiveNames.length > 0) {
-      // First get the item name as a fallback
-      const itemName = fieldMap.get('name') || item.name || '';
-      
-      // Extract potential matching terms from the prompt
-      // This allows users to explicitly specify what to match in their prompts
-      const extractionMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: `You are an extraction assistant. Extract the name of the health system, hospital, or healthcare organization that needs to be matched against a database. Return ONLY the name with no additional text or explanation. If multiple names are mentioned, list each one on a separate line. If no organization name is mentioned, respond with "NO_EXTRACTION_POSSIBLE".`
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ];
-      
-      // Call OpenAI API to extract matching terms
-      const extractionResponse = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: extractionMessages,
-        max_tokens: 100,
-        temperature: 0.1,
-      });
-      
-      // Get the extraction result
-      const extractionResult = extractionResponse.choices[0]?.message?.content?.trim() || '';
-      matchInfo = `Extraction Result: ${extractionResult}`;
-      
-      // Use the extraction result if available, otherwise fall back to item name
-      const searchTerms = extractionResult !== 'NO_EXTRACTION_POSSIBLE' ? 
-        extractionResult.split('\n').filter(Boolean) : 
-        (itemName ? [itemName] : []);
-      
-      if (searchTerms.length > 0) {
-        // For each search term, check for matches
-        let allMatchedNames: string[] = [];
-        
-        for (const searchTerm of searchTerms) {
-          // STEP 1: Ask the AI to check if the term matches any health system name
-          const matchMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            {
-              role: 'system',
-              content: `You are a health system matching assistant. You have access to a database of health system names. Your task is to check if the provided health system name matches or is similar to any names in our database. IMPORTANT: Only return exact matches or very close matches. Don't return weak or questionable matches.`
+      // For the single item, try to find matches in Definitive data
+      // First, extract potential organization names from the prompt
+      try {
+        const extractionResponse = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { 
+              role: 'system', 
+              content: `You are an extraction assistant. Extract the name of any health system, hospital, or healthcare organization mentioned. 
+Return ONLY the extracted name with no additional text or explanation. If multiple names are mentioned, return the most prominent one. 
+If no organization name is mentioned, respond with "NO_EXTRACTION_POSSIBLE".` 
             },
-            {
-              role: 'user',
-              content: `Check if "${searchTerm}" matches or is very similar to any of the following health system names. If you find a match, respond ONLY with the matching name from the list, exactly as written. If there are multiple matches, list each one on a new line. If there are no matches, respond with "NO_MATCH".
-
-Here is the full list of health system names to check against:
-${definitiveNames.join('\n')}`
-            }
-          ];
-
-          // Call OpenAI API for the match check
-          const matchResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: matchMessages,
-            max_tokens: 100,
-            temperature: 0.1, // Keep it focused and precise
-          });
-
-          // Extract the match response
-          const matchResult = matchResponse.choices[0]?.message?.content?.trim() || '';
-          matchInfo += `\nMatch Result for "${searchTerm}": ${matchResult}`;
-          
-          // If we found matches, add them to our list
-          if (matchResult && matchResult !== 'NO_MATCH') {
-            const matchedTerms = matchResult.split('\n').map(name => name.trim()).filter(Boolean);
-            allMatchedNames = [...allMatchedNames, ...matchedTerms];
-          }
-        }
+            { role: 'user', content: `Extract company/organization names from: ${prompt}` }
+          ],
+          temperature: 0.1,
+          max_tokens: 100,
+        });
         
-        // Remove duplicates
-        allMatchedNames = allMatchedNames.filter((name, index, self) => 
-          self.indexOf(name) === index
-        );
+        const extractedName = extractionResponse.choices[0].message.content?.trim() || '';
+        matchInfo = `Extraction Result: ${extractedName}`;
         
-        // If we found matches, proceed with the second API call
-        if (allMatchedNames.length > 0) {
-          matchInfo += `\nFinal Matches: ${allMatchedNames.join(', ')}`;
-          
-          // Find the matched systems in our data
-          const matchedSystems = definitiveData.filter(system => 
-            allMatchedNames.some(name => system.Name === name)
+        if (extractedName && extractedName !== "NO_EXTRACTION_POSSIBLE") {
+          // Look for exact matches first
+          let matches = definitiveData.filter(
+            system => system.Name.toLowerCase() === extractedName.toLowerCase()
           );
           
-          if (matchedSystems.length > 0) {
-            // STEP 2: Second API call with the full context of matched systems
-            const detailMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-              {
-                role: 'system',
-                content: `You are an AI assistant helping to enrich data. ${instructions}`
-              },
-              {
-                role: 'system',
-                content: `I found these detailed matches in the Definitive Healthcare database:
-${matchedSystems.map((match, index) => `
-Match ${index + 1}: ${match.Name}
-- Type: ${match.FirmType || 'Unknown'}
-- EMR Vendor (Ambulatory): ${match.EMRVendorAmbulatory || 'Unknown'}
-- EMR Vendor (Inpatient): ${match.EMRVendorInpatient || 'Unknown'}
-- Net Patient Revenue: ${match.NetPatientRev ? '$' + match.NetPatientRev.toLocaleString() : 'Unknown'}
-- Number of Beds: ${match.NumBeds || 'Unknown'}
-- Number of Hospitals: ${match.NumHospitals || 'Unknown'}
-- Website: ${match.WebSite || 'Unknown'}
-- Location: ${[match.HQCity, match.State].filter(Boolean).join(', ') || 'Unknown'}
-`).join('\n')}
-
-Use this information to help answer the question. Don't explicitly mention that you're using Definitive Healthcare data in your response.`
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ];
-
-            // Call OpenAI API with the detailed context
-            const detailResponse = await openai.chat.completions.create({
-              model: 'gpt-4o-mini-search-preview',
-              messages: detailMessages,
-              max_tokens: 200,
-            });
-
-            finalResponse = detailResponse.choices[0]?.message?.content?.trim() || '';
-          } else {
-            // We got match names but couldn't find them in our data (shouldn't happen)
-            console.warn(`Found matches ${allMatchedNames.join(', ')} but couldn't find them in definitiveData`);
-            matchInfo += '\nWarning: Found matches but couldn\'t find them in definitiveData';
+          // If no exact matches, try contains matching
+          if (matches.length === 0) {
+            matches = definitiveData.filter(
+              system => system.Name.toLowerCase().includes(extractedName.toLowerCase()) || 
+              extractedName.toLowerCase().includes(system.Name.toLowerCase())
+            );
+          }
+          
+          if (matches.length > 0) {
+            // Limit to first 3 matches to avoid overwhelming the context
+            const limitedMatches = matches.slice(0, 3);
+            matchInfo += `\nMatches found: ${limitedMatches.map(m => m.Name).join(', ')}`;
             
-            // Fall back to the regular API call without Definitive data
-            const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-              {
-                role: 'system',
-                content: `You are an AI assistant helping to enrich data. ${instructions}`
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ];
-
-            const regularResponse = await openai.chat.completions.create({
-              model: 'gpt-4o-mini-search-preview',
-              messages: regularMessages,
-              max_tokens: 200,
-            });
-
-            finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
+            // Create detailed system content
+            definitiveSystemContent = `You have access to healthcare system data from Definitive Healthcare. Here is information about specific health systems relevant to this item:\n\n`;
+            
+            for (const system of limitedMatches) {
+              definitiveSystemContent += `- ${system.Name}\n`;
+              definitiveSystemContent += `  - Type: ${system.FirmType || 'Unknown'}\n`;
+              definitiveSystemContent += `  - EMR Vendor (Ambulatory): ${system.EMRVendorAmbulatory || 'Unknown'}\n`;
+              definitiveSystemContent += `  - EMR Vendor (Inpatient): ${system.EMRVendorInpatient || 'Unknown'}\n`;
+              definitiveSystemContent += `  - Net Patient Revenue: ${system.NetPatientRev ? '$' + system.NetPatientRev.toLocaleString() : 'Unknown'}\n`;
+              definitiveSystemContent += `  - Number of Beds: ${system.NumBeds || 'Unknown'}\n`;
+              definitiveSystemContent += `  - Number of Hospitals: ${system.NumHospitals || 'Unknown'}\n`;
+              definitiveSystemContent += `  - Website: ${system.WebSite || 'Unknown'}\n`;
+              definitiveSystemContent += `  - Location: ${[system.HQCity, system.State].filter(Boolean).join(', ') || 'Unknown'}\n\n`;
+            }
+            
+            definitiveSystemContent += `Use this information to help with your response. Don't explicitly mention that you're using Definitive Healthcare data in your response.`;
+          } else {
+            // No matches found
+            definitiveSystemContent = `You checked a database of ${definitiveNames.length} health systems and did not find any matches for the organizations mentioned. Please use your general knowledge to answer the question.`;
+            matchInfo += '\nNo matches found in the database';
           }
         } else {
-          // No match found, use regular processing but tell the AI we checked
-          matchInfo += '\nNo matches found in the database';
-          
-          const noMatchMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            {
-              role: 'system',
-              content: `You are an AI assistant helping to enrich data. ${instructions}`
-            },
-            {
-              role: 'system',
-              content: `I checked our Definitive Healthcare database of ${definitiveNames.length} health systems and did not find any matches for the organizations mentioned in your query. Please use your general knowledge to answer the question.`
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ];
-
-          const noMatchResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini-search-preview',
-            messages: noMatchMessages,
-            max_tokens: 200,
-          });
-
-          finalResponse = noMatchResponse.choices[0]?.message?.content?.trim() || '';
+          // No extraction possible
+          definitiveSystemContent = `You checked a database of ${definitiveNames.length} health systems, but no organization name could be extracted from the prompt. Please use your general knowledge to answer the question.`;
+          matchInfo += '\nNo organization names identified to match';
         }
-      } else {
-        // No terms to search with, use regular processing
-        matchInfo += '\nNo organization names identified to match';
-        
-        const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-          {
-            role: 'system',
-            content: `You are an AI assistant helping to enrich data. ${instructions}`
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ];
-
-        const regularResponse = await openai.chat.completions.create({
-          model: 'gpt-4o-mini-search-preview',
-          messages: regularMessages,
-          max_tokens: 200,
-        });
-
-        finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
+      } catch (extractError) {
+        console.error('Error extracting organization names:', extractError);
+        // Fallback to generic context
+        definitiveSystemContent = `You have access to healthcare system data. Consider healthcare-specific factors when analyzing this item.`;
+        matchInfo += '\nError during extraction process';
       }
-    } else {
-      // Regular processing without Definitive data
-      const regularMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: `You are an AI assistant helping to enrich data. ${instructions}`
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ];
+    }
 
-      const regularResponse = await openai.chat.completions.create({
-        model: 'gpt-4o-mini-search-preview',
-        messages: regularMessages,
+    // First try with gpt-3.5-turbo (cheaper)
+    const gpt35Response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: systemPrompt + (definitiveSystemContent ? '\n\n' + definitiveSystemContent : '') },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0,
+      max_tokens: 200,
+    });
+
+    const gpt35Content = gpt35Response.choices[0].message.content?.trim() || '';
+    let finalResponse = gpt35Content;
+    let modelUsed = 'gpt-3.5-turbo';
+
+    // Check if the response is ambiguous (for boolean type) and fallback to gpt-4o if needed
+    let isAmbiguous = false;
+    if (columnType === 'boolean') {
+      const cleanResponse = gpt35Content.trim().toLowerCase();
+      if (cleanResponse !== 'yes' && cleanResponse !== 'no') {
+        isAmbiguous = true;
+      }
+    }
+
+    // For ambiguous responses or other complex cases, try with gpt-4o
+    if (isAmbiguous) {
+      matchInfo += '\nFalling back to gpt-4o due to ambiguous response from gpt-3.5-turbo';
+      
+      const gpt4oResponse = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt + (definitiveSystemContent ? '\n\n' + definitiveSystemContent : '') },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0,
         max_tokens: 200,
       });
 
-      finalResponse = regularResponse.choices[0]?.message?.content?.trim() || '';
+      finalResponse = gpt4oResponse.choices[0].message.content?.trim() || '';
+      modelUsed = 'gpt-4o';
     }
     
     // Process response based on column type
@@ -308,7 +208,8 @@ Use this information to help answer the question. Don't explicitly mention that 
         return NextResponse.json({ 
           error: 'AI did not return a valid number',
           rawResponse: finalResponse,
-          matchInfo
+          matchInfo,
+          modelUsed
         }, { status: 400 });
       }
     } else {
@@ -319,7 +220,8 @@ Use this information to help answer the question. Don't explicitly mention that 
       success: true,
       result: processedResponse,
       rawResponse: finalResponse,
-      matchInfo: matchInfo || undefined
+      matchInfo: matchInfo || undefined,
+      modelUsed
     });
   } catch (error) {
     console.error('Error testing AI prompt:', error);
