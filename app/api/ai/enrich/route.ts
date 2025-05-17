@@ -168,7 +168,7 @@ Always start your response with "Item X (ID: [id]): " followed by the extracted 
             let extractMatch;
             
             while ((extractMatch = extractRegex.exec(extractionContent + "\n")) !== null) {
-              const [_, itemNum, itemId, extractedName] = extractMatch;
+              const [_, __, itemId, extractedName] = extractMatch;
               
               if (extractedName && extractedName.trim() !== "NO_EXTRACTION_POSSIBLE") {
                 // For each extracted name, look for matches in Definitive data
@@ -261,7 +261,7 @@ Always start your response with "Item X (ID: [id]): " followed by the extracted 
         let match;
 
         while ((match = responseRegex.exec(gpt35Content + "\n")) !== null) {
-          const [_, itemNum, itemId, itemResponse] = match;
+          const [_, __, itemId, itemResponse] = match;
           const originalBatchItem = batch.find(item => item.id === itemId);
           
           if (!originalBatchItem) continue;
@@ -307,7 +307,7 @@ Always start your response with "Item X (ID: [id]): " followed by the extracted 
           const fallbackRegex = /Item (\d+) \(ID: ([^)]+)\):\s*([\s\S]*?)(?=(?:Item \d+|$)|$)/g;
 
           while ((fallbackMatch = fallbackRegex.exec(gpt4oContent + "\n")) !== null) {
-            const [_, itemNum, itemId, itemResponse] = fallbackMatch;
+            const [_, __, itemId, itemResponse] = fallbackMatch;
             const originalBatchItem = ambiguousItems.find(item => item.id === itemId);
             
             if (originalBatchItem) {
