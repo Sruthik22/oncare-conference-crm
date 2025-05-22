@@ -318,8 +318,81 @@ export default function Home() {
   }, []);
 
   // Handle item click to select an item
-  const handleItemClick = useCallback((item: Attendee | HealthSystem | Conference) => {
-    setSelectedItem(item);
+  const handleItemClick = useCallback(async (item: Attendee | HealthSystem | Conference) => {
+    // Fetch complete data with relationships when an item is clicked
+    try {
+      // Determine entity type
+      let fullItem = null;
+      
+      if ('first_name' in item) {
+        // It's an attendee - fetch with health system and conferences
+        const { data, error } = await supabase
+          .from('attendees')
+          .select(`
+            *,
+            health_systems (*),
+            attendee_conferences (
+              *,
+              conferences (*)
+            )
+          `)
+          .eq('id', item.id)
+          .single();
+          
+        if (error) throw error;
+        fullItem = data;
+      } 
+      else if ('start_date' in item) {
+        // It's a conference - fetch with attendees
+        const { data, error } = await supabase
+          .from('conferences')
+          .select(`
+            *,
+            attendee_conferences (
+              *,
+              attendees (
+                id, first_name, last_name, title, company
+              )
+            )
+          `)
+          .eq('id', item.id)
+          .single();
+          
+        if (error) throw error;
+        fullItem = data;
+      } 
+      else {
+        // It's a health system - fetch with attendees
+        const { data, error } = await supabase
+          .from('health_systems')
+          .select('*')
+          .eq('id', item.id)
+          .single();
+          
+        if (error) throw error;
+        
+        // Also fetch attendees linked to this health system
+        const { data: attendeesData, error: attendeesError } = await supabase
+          .from('attendees')
+          .select('id, first_name, last_name, title, company, email')
+          .eq('health_system_id', item.id);
+          
+        if (attendeesError) throw attendeesError;
+        
+        // Combine the data
+        fullItem = {
+          ...data,
+          attendees: attendeesData || []
+        };
+      }
+      
+      // Set the selected item with complete relationship data
+      setSelectedItem(fullItem || item);
+    } catch (err) {
+      console.error('Error fetching complete entity data:', err);
+      // Fall back to using the item as is if there's an error
+      setSelectedItem(item);
+    }
   }, []);
 
   // Handle back button click
@@ -469,32 +542,109 @@ export default function Home() {
   }, [setAttendees]);
 
   // Handler for clicking on a health system link
-  const handleHealthSystemClick = useCallback((healthSystemId: string) => {
-    // Find the health system and set it as the selected item
-    const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
-    if (healthSystem) {
+  const handleHealthSystemClick = useCallback(async (healthSystemId: string) => {
+    try {
+      // Fetch the health system with complete data
+      const { data, error } = await supabase
+        .from('health_systems')
+        .select('*')
+        .eq('id', healthSystemId)
+        .single();
+        
+      if (error) throw error;
+      
+      // Also fetch attendees linked to this health system
+      const { data: attendeesData, error: attendeesError } = await supabase
+        .from('attendees')
+        .select('id, first_name, last_name, title, company, email')
+        .eq('health_system_id', healthSystemId);
+        
+      if (attendeesError) throw attendeesError;
+      
+      // Combine the data
+      const healthSystem = {
+        ...data,
+        attendees: attendeesData || []
+      };
+      
+      // Set active tab and selected item
       setActiveTab('health-systems');
       setSelectedItem(healthSystem);
+    } catch (err) {
+      console.error('Error fetching health system:', err);
+      // Fallback to basic data if available
+      const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
+      if (healthSystem) {
+        setActiveTab('health-systems');
+        setSelectedItem(healthSystem);
+      }
     }
   }, [healthSystems]);
 
   // Handler for clicking on a conference link
-  const handleConferenceClick = useCallback((conferenceId: string) => {
-    // Find the conference and set it as the selected item
-    const conference = conferences.find(conf => conf.id === conferenceId);
-    if (conference) {
+  const handleConferenceClick = useCallback(async (conferenceId: string) => {
+    try {
+      // Fetch the conference with complete data
+      const { data, error } = await supabase
+        .from('conferences')
+        .select(`
+          *,
+          attendee_conferences (
+            *,
+            attendees (
+              id, first_name, last_name, title, company
+            )
+          )
+        `)
+        .eq('id', conferenceId)
+        .single();
+        
+      if (error) throw error;
+      
+      // Set active tab and selected item
       setActiveTab('conferences');
-      setSelectedItem(conference);
+      setSelectedItem(data);
+    } catch (err) {
+      console.error('Error fetching conference:', err);
+      // Fallback to basic data if available
+      const conference = conferences.find(conf => conf.id === conferenceId);
+      if (conference) {
+        setActiveTab('conferences');
+        setSelectedItem(conference);
+      }
     }
   }, [conferences]);
 
   // Handler for clicking on an attendee link
-  const handleAttendeeClick = useCallback((attendeeId: string) => {
-    // Find the attendee and set it as the selected item
-    const attendee = attendees.find(att => att.id === attendeeId);
-    if (attendee) {
+  const handleAttendeeClick = useCallback(async (attendeeId: string) => {
+    try {
+      // Fetch the attendee with complete data
+      const { data, error } = await supabase
+        .from('attendees')
+        .select(`
+          *,
+          health_systems (*),
+          attendee_conferences (
+            *,
+            conferences (*)
+          )
+        `)
+        .eq('id', attendeeId)
+        .single();
+        
+      if (error) throw error;
+      
+      // Set active tab and selected item
       setActiveTab('attendees');
-      setSelectedItem(attendee);
+      setSelectedItem(data);
+    } catch (err) {
+      console.error('Error fetching attendee:', err);
+      // Fallback to basic data if available
+      const attendee = attendees.find(att => att.id === attendeeId);
+      if (attendee) {
+        setActiveTab('attendees');
+        setSelectedItem(attendee);
+      }
     }
   }, [attendees]);
 
