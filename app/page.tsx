@@ -139,7 +139,6 @@ CardView.displayName = 'CardView';
 // Extract the selected item detail rendering into a memoized component
 const SelectedItemDetail = memo(({ 
   selectedItem,
-  attendees,
   onAttendeeUpdate,
   onAttendeeDelete,
   onHealthSystemClick,
@@ -151,7 +150,6 @@ const SelectedItemDetail = memo(({
   onConferenceDelete
 }: { 
   selectedItem: Attendee | HealthSystem | Conference
-  attendees: Attendee[]
   onAttendeeUpdate: (updatedAttendee: Attendee) => void
   onAttendeeDelete: (deletedAttendeeId: string) => void
   onHealthSystemClick: (healthSystemId: string) => void
@@ -181,21 +179,11 @@ const SelectedItemDetail = memo(({
       onAttendeeClick={onAttendeeClick}
     />
   } else {
-    // Find attendees linked to this health system
-    const linkedAttendees = attendees
-      .filter(att => att.health_system_id === selectedItem.id)
-      .map(att => ({
-        id: att.id,
-        first_name: att.first_name,
-        last_name: att.last_name
-      }));
-    
     return <HealthSystemDetailAdapter 
       healthSystem={selectedItem} 
       onUpdate={onHealthSystemUpdate}
       onDelete={onHealthSystemDelete}
       onAttendeeClick={onAttendeeClick}
-      linkedAttendees={linkedAttendees}
     />
   }
 });
@@ -318,81 +306,9 @@ export default function Home() {
   }, []);
 
   // Handle item click to select an item
-  const handleItemClick = useCallback(async (item: Attendee | HealthSystem | Conference) => {
-    // Fetch complete data with relationships when an item is clicked
-    try {
-      // Determine entity type
-      let fullItem = null;
-      
-      if ('first_name' in item) {
-        // It's an attendee - fetch with health system and conferences
-        const { data, error } = await supabase
-          .from('attendees')
-          .select(`
-            *,
-            health_systems (*),
-            attendee_conferences (
-              *,
-              conferences (*)
-            )
-          `)
-          .eq('id', item.id)
-          .single();
-          
-        if (error) throw error;
-        fullItem = data;
-      } 
-      else if ('start_date' in item) {
-        // It's a conference - fetch with attendees
-        const { data, error } = await supabase
-          .from('conferences')
-          .select(`
-            *,
-            attendee_conferences (
-              *,
-              attendees (
-                id, first_name, last_name, title, company
-              )
-            )
-          `)
-          .eq('id', item.id)
-          .single();
-          
-        if (error) throw error;
-        fullItem = data;
-      } 
-      else {
-        // It's a health system - fetch with attendees
-        const { data, error } = await supabase
-          .from('health_systems')
-          .select('*')
-          .eq('id', item.id)
-          .single();
-          
-        if (error) throw error;
-        
-        // Also fetch attendees linked to this health system
-        const { data: attendeesData, error: attendeesError } = await supabase
-          .from('attendees')
-          .select('id, first_name, last_name, title, company, email')
-          .eq('health_system_id', item.id);
-          
-        if (attendeesError) throw attendeesError;
-        
-        // Combine the data
-        fullItem = {
-          ...data,
-          attendees: attendeesData || []
-        };
-      }
-      
-      // Set the selected item with complete relationship data
-      setSelectedItem(fullItem || item);
-    } catch (err) {
-      console.error('Error fetching complete entity data:', err);
-      // Fall back to using the item as is if there's an error
-      setSelectedItem(item);
-    }
+  const handleItemClick = useCallback((item: Attendee | HealthSystem | Conference) => {
+    // Simply set the selected item - EntityDetail will fetch complete data
+    setSelectedItem(item);
   }, []);
 
   // Handle back button click
@@ -543,110 +459,157 @@ export default function Home() {
 
   // Handler for clicking on a health system link
   const handleHealthSystemClick = useCallback(async (healthSystemId: string) => {
+    console.log('Health system click handler called with ID:', healthSystemId);
+    
+    // First try to find the health system in the existing data
+    const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
+    
+    if (healthSystem) {
+      console.log('Found health system in existing data:', healthSystem);
+      setActiveTab('health-systems');
+      setSelectedItem(healthSystem);
+      return;
+    }
+    
+    // If not found in existing data, fetch it from the database
+    console.log('Health system not found in existing data, fetching from database');
     try {
-      // Fetch the health system with complete data
-      const { data, error } = await supabase
+      const { data: fetchedHealthSystem, error } = await supabase
         .from('health_systems')
         .select('*')
         .eq('id', healthSystemId)
         .single();
-        
-      if (error) throw error;
       
-      // Also fetch attendees linked to this health system
-      const { data: attendeesData, error: attendeesError } = await supabase
-        .from('attendees')
-        .select('id, first_name, last_name, title, company, email')
-        .eq('health_system_id', healthSystemId);
-        
-      if (attendeesError) throw attendeesError;
-      
-      // Combine the data
-      const healthSystem = {
-        ...data,
-        attendees: attendeesData || []
-      };
-      
-      // Set active tab and selected item
-      setActiveTab('health-systems');
-      setSelectedItem(healthSystem);
-    } catch (err) {
-      console.error('Error fetching health system:', err);
-      // Fallback to basic data if available
-      const healthSystem = healthSystems.find(hs => hs.id === healthSystemId);
-      if (healthSystem) {
-        setActiveTab('health-systems');
-        setSelectedItem(healthSystem);
+      if (error) {
+        console.error('Error fetching health system:', error);
+        return;
       }
+      
+      if (fetchedHealthSystem) {
+        console.log('Successfully fetched health system:', fetchedHealthSystem);
+        
+        // Add the fetched health system to the array
+        setHealthSystems(prev => [...prev, fetchedHealthSystem]);
+        
+        // Set the active tab and selected item
+        setActiveTab('health-systems');
+        setSelectedItem(fetchedHealthSystem);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching health system:', err);
     }
-  }, [healthSystems]);
+  }, [healthSystems, setHealthSystems]);
 
   // Handler for clicking on a conference link
   const handleConferenceClick = useCallback(async (conferenceId: string) => {
+    // Find the conference in the existing data
+    const conference = conferences.find(conf => conf.id === conferenceId);
+    
+    if (conference) {
+      setActiveTab('conferences');
+      setSelectedItem(conference);
+      return;
+    }
+    
+    // If not found in existing data, fetch it from the database
     try {
-      // Fetch the conference with complete data
-      const { data, error } = await supabase
+      const { data: fetchedConference, error } = await supabase
         .from('conferences')
         .select(`
           *,
           attendee_conferences (
-            *,
-            attendees (
-              id, first_name, last_name, title, company
+            id,
+            attendee_id,
+            attendees:attendees (
+              id,
+              first_name,
+              last_name,
+              title,
+              company,
+              email
             )
           )
         `)
         .eq('id', conferenceId)
         .single();
-        
-      if (error) throw error;
       
-      // Set active tab and selected item
-      setActiveTab('conferences');
-      setSelectedItem(data);
-    } catch (err) {
-      console.error('Error fetching conference:', err);
-      // Fallback to basic data if available
-      const conference = conferences.find(conf => conf.id === conferenceId);
-      if (conference) {
-        setActiveTab('conferences');
-        setSelectedItem(conference);
+      if (error) {
+        console.error('Error fetching conference:', error);
+        return;
       }
+      
+      if (fetchedConference) {
+        // Process the data to ensure consistent structure
+        if (fetchedConference.attendee_conferences) {
+          fetchedConference.attendee_conferences = fetchedConference.attendee_conferences.map((ac: any) => {
+            return {
+              ...ac,
+              attendee: ac.attendees
+            };
+          });
+        }
+        
+        // Add the fetched conference to the array
+        setConferences(prev => [...prev, fetchedConference]);
+        
+        // Set the active tab and selected item
+        setActiveTab('conferences');
+        setSelectedItem(fetchedConference);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching conference:', err);
     }
-  }, [conferences]);
+  }, [conferences, setConferences]);
 
   // Handler for clicking on an attendee link
   const handleAttendeeClick = useCallback(async (attendeeId: string) => {
+    // Find the attendee in the existing data
+    const attendee = attendees.find(att => att.id === attendeeId);
+    
+    if (attendee) {
+      setActiveTab('attendees');
+      setSelectedItem(attendee);
+      return;
+    }
+    
+    // If not found in existing data, fetch it from the database
     try {
-      // Fetch the attendee with complete data
-      const { data, error } = await supabase
+      const { data: fetchedAttendee, error } = await supabase
         .from('attendees')
         .select(`
           *,
-          health_systems (*),
+          health_systems (id, name, definitive_id, website, address, city, state, zip),
           attendee_conferences (
-            *,
-            conferences (*)
+            conference_id,
+            conferences (
+              id,
+              name,
+              start_date,
+              end_date,
+              location
+            )
           )
         `)
         .eq('id', attendeeId)
         .single();
-        
-      if (error) throw error;
       
-      // Set active tab and selected item
-      setActiveTab('attendees');
-      setSelectedItem(data);
-    } catch (err) {
-      console.error('Error fetching attendee:', err);
-      // Fallback to basic data if available
-      const attendee = attendees.find(att => att.id === attendeeId);
-      if (attendee) {
-        setActiveTab('attendees');
-        setSelectedItem(attendee);
+      if (error) {
+        console.error('Error fetching attendee:', error);
+        return;
       }
+      
+      if (fetchedAttendee) {
+        // Add the fetched attendee to the array
+        setAttendees(prev => [...prev, fetchedAttendee]);
+        
+        // Set the active tab and selected item
+        setActiveTab('attendees');
+        setSelectedItem(fetchedAttendee);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching attendee:', err);
     }
-  }, [attendees]);
+  }, [attendees, setAttendees]);
 
   // Handle tab change with server-side data fetching
   const handleTabChange = useCallback((tab: 'attendees' | 'health-systems' | 'conferences') => {
@@ -842,7 +805,6 @@ export default function Home() {
           
           <SelectedItemDetail 
             selectedItem={selectedItem}
-            attendees={attendees}
             onAttendeeUpdate={handleAttendeeUpdate}
             onAttendeeDelete={handleAttendeeDelete}
             onHealthSystemClick={handleHealthSystemClick}

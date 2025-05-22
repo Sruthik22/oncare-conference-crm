@@ -8,6 +8,7 @@ import {
   AcademicCapIcon,
   CalendarIcon,
 } from '@heroicons/react/24/outline'
+import { useState, useEffect } from 'react'
 import type { Attendee, HealthSystem } from '@/types'
 import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/features/entities/EntityDetail'
 import { supabase } from '@/lib/supabase'
@@ -39,6 +40,41 @@ export const AttendeeDetailAdapter = ({
   onConferenceClick,
   isNewEntity = false
 }: AttendeeDetailAdapterProps) => {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [fullAttendee, setFullAttendee] = useState<Attendee>(attendee)
+
+  // Load full attendee data when component mounts
+  useEffect(() => {
+    const loadAttendeeData = async () => {
+      // Skip for new entities
+      if (isNewEntity || !attendee.id || attendee.id === 'new') {
+        return
+      }
+
+      try {
+        setLoading(true)
+        setError(null)
+        
+        const result = await fetchAttendeeWithRelationships(attendee.id)
+        
+        if (result.error) {
+          console.error('Error loading attendee data:', result.error)
+          setError('Failed to load complete attendee data')
+        } else if (result.data) {
+          setFullAttendee(result.data)
+        }
+      } catch (err) {
+        console.error('Error in loadAttendeeData:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load attendee data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadAttendeeData()
+  }, [attendee.id, isNewEntity])
+
   // Define the fields for the attendee
   const attendeeFields: FieldDefinition[] = [
     {
@@ -205,17 +241,51 @@ export const AttendeeDetailAdapter = ({
       };
     }
     
-    // Fetch the attendee with health system and conference relationships
-    const response = await supabase
-      .from('attendees')
-      .select('*, health_systems(*), attendee_conferences(*, conferences(*))')
-      .eq('id', attendeeId)
-      .single();
+    try {
+      // Fetch the attendee with health system and conference relationships
+      const response = await supabase
+        .from('attendees')
+        .select(`
+          *,
+          health_system_id,
+          health_systems (*),
+          attendee_conferences (
+            id,
+            conference_id,
+            conferences (
+              id,
+              name,
+              start_date,
+              end_date,
+              location
+            )
+          )
+        `)
+        .eq('id', attendeeId)
+        .single();
       
-    return {
-      data: response.data,
-      error: response.error
-    };
+      if (response.error) {
+        console.error('Error fetching attendee data:', response.error);
+        return {
+          data: null,
+          error: response.error
+        };
+      }
+      
+      console.log('Attendee relationships fetched:', response.data);
+      
+      // Return the result
+      return {
+        data: response.data,
+        error: null
+      };
+    } catch (err) {
+      console.error('Error in fetchAttendeeWithRelationships:', err);
+      return {
+        data: null,
+        error: err instanceof Error ? err : new Error('Unknown error fetching attendee data')
+      };
+    }
   };
 
   // Define tags for linked entities
@@ -227,12 +297,24 @@ export const AttendeeDetailAdapter = ({
         const attendee = entity as Attendee;
         return attendee.health_systems ? [attendee.health_systems] : [];
       },
-      getLabel: (item: HealthSystem) => item.name || 'Unknown Health System',
+      getLabel: (item) => {
+        // Cast item to avoid TypeScript errors
+        const healthSystem = item as Partial<HealthSystem>;
+        return healthSystem.name || 'Unknown Health System';
+      },
       getColor: () => 'bg-blue-100 text-blue-800 hover:bg-blue-200',
       icon: BuildingOfficeIcon,
-      onClick: () => {
-        if (onHealthSystemClick && attendee.health_system_id) {
-          onHealthSystemClick(attendee.health_system_id);
+      onClick: (item) => {
+        console.log('Health system item clicked:', item);
+        if (onHealthSystemClick) {
+          // Use unknown type first to avoid TypeScript errors
+          const healthSystem = item as unknown as { id?: string };
+          if (healthSystem.id) {
+            console.log('Navigating to health system with ID:', healthSystem.id);
+            onHealthSystemClick(healthSystem.id);
+          } else {
+            console.error('No valid health system ID found in clicked item:', item);
+          }
         }
       },
       labelKey: 'Health System',
@@ -240,7 +322,7 @@ export const AttendeeDetailAdapter = ({
       removable: true,
       onRemove: removeHealthSystem,
       addable: true,
-      onAdd: (entity, item) => addHealthSystem(entity, item),
+      onAdd: addHealthSystem,
       getAvailableItems: getAvailableHealthSystems,
       itemLabelKey: 'name'
     },
@@ -262,8 +344,17 @@ export const AttendeeDetailAdapter = ({
       },
       icon: CalendarIcon,
       onClick: (item: AttendeeConference) => {
+        console.log('Conference item clicked:', item);
         if (onConferenceClick) {
-          onConferenceClick(item.conference_id);
+          if (item.conference_id) {
+            console.log('Navigating to conference with ID:', item.conference_id);
+            onConferenceClick(item.conference_id);
+          } else if (item.conferences && item.conferences.id) {
+            console.log('Navigating to conference with nested ID:', item.conferences.id);
+            onConferenceClick(item.conferences.id);
+          } else {
+            console.error('No valid conference ID found in clicked item:', item);
+          }
         }
       },
       labelKey: 'Conferences',
@@ -343,22 +434,55 @@ export const AttendeeDetailAdapter = ({
     }
   ];
 
+  // Handle successful update
+  const handleUpdate = (updatedAttendee: Attendee) => {
+    setFullAttendee(updatedAttendee);
+    if (onUpdate) {
+      onUpdate(updatedAttendee);
+    }
+  };
+
   return (
-    <EntityDetail
-      entity={attendee}
-      entityType="attendee"
-      tableName="attendees"
-      iconColor="primary"
-      fields={attendeeFields}
-      tags={attendeeTags}
-      title={(entity) => `${(entity as Attendee).first_name} ${(entity as Attendee).last_name}`}
-      subtitle={(entity) => (entity as Attendee).title || null}
-      onUpdate={onUpdate as (updatedEntity: any) => void}
-      onDelete={onDelete}
-      showApolloIntegration={true}
-      conferenceName={conferenceName}
-      fetchWithRelationships={fetchAttendeeWithRelationships}
-      isNewEntity={isNewEntity}
-    />
+    <div>
+      {loading && (
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700">Loading attendee data...</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <EntityDetail
+        entity={fullAttendee}
+        entityType="attendee"
+        tableName="attendees"
+        iconColor="primary"
+        fields={attendeeFields}
+        tags={attendeeTags}
+        title={(entity) => `${(entity as Attendee).first_name} ${(entity as Attendee).last_name}`}
+        subtitle={(entity) => (entity as Attendee).title || null}
+        onUpdate={handleUpdate as (updatedEntity: EntityTypes) => void}
+        onDelete={onDelete}
+        showApolloIntegration={true}
+        conferenceName={conferenceName}
+        fetchWithRelationships={fetchAttendeeWithRelationships}
+        isNewEntity={isNewEntity}
+      />
+    </div>
   );
 }; 

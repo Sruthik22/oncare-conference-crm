@@ -3,6 +3,7 @@ import {
   MapPinIcon, 
   UserIcon
 } from '@heroicons/react/24/outline'
+import { useState, useEffect } from 'react'
 import type { Conference } from '@/types'
 import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/features/entities/EntityDetail'
 import { supabase } from '@/lib/supabase'
@@ -22,6 +23,41 @@ export const ConferenceDetailAdapter = ({
   onAttendeeClick,
   isNewEntity = false
 }: ConferenceDetailAdapterProps) => {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [fullConference, setFullConference] = useState<Conference>(conference)
+
+  // Load full conference data when component mounts
+  useEffect(() => {
+    const loadConferenceData = async () => {
+      // Skip for new entities
+      if (isNewEntity || !conference.id || conference.id === 'new') {
+        return
+      }
+
+      try {
+        setLoading(true)
+        setError(null)
+        
+        const result = await fetchConferenceWithRelationships(conference.id)
+        
+        if (result.error) {
+          console.error('Error loading conference data:', result.error)
+          setError('Failed to load complete conference data')
+        } else if (result.data) {
+          setFullConference(result.data)
+        }
+      } catch (err) {
+        console.error('Error in loadConferenceData:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load conference data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadConferenceData()
+  }, [conference.id, isNewEntity])
+
   // Define the fields for the conference
   const conferenceFields: FieldDefinition[] = [
     {
@@ -133,15 +169,23 @@ export const ConferenceDetailAdapter = ({
       icon: UserIcon,
       labelKey: 'Attendees',
       onClick: (item) => {
-        if (onAttendeeClick && item.attendee_id) {
-          onAttendeeClick(item.attendee_id);
+        // Ensure we have a valid attendee_id and handler before calling
+        if (onAttendeeClick && (item.attendee_id || (item.attendees && item.attendees.id))) {
+          // Use either the direct attendee_id or get it from the nested attendees object
+          const attendeeId = item.attendee_id || (item.attendees ? item.attendees.id : null);
+          if (attendeeId) {
+            console.log('Navigating to attendee:', attendeeId);
+            onAttendeeClick(attendeeId);
+          } else {
+            console.error('No valid attendee ID found in item:', item);
+          }
         }
       },
       // Add tag management capabilities
       removable: true,
       onRemove: removeAttendee,
       addable: true,
-      onAdd: (entity, item) => addAttendee(entity, item),
+      onAdd: addAttendee,
       getAvailableItems: getAvailableAttendees,
       itemLabelKey: 'first_name',
       // Custom label for attendees that combines first and last name
@@ -160,43 +204,110 @@ export const ConferenceDetailAdapter = ({
       };
     }
     
-    // Fetch the conference with attendee relationships
-    const response = await supabase
-      .from('conferences')
-      .select('*, attendee_conferences(id, attendee_id, conference_id, attendees:attendees(id, first_name, last_name, title, company))')
-      .eq('id', conferenceId)
-      .single();
-    
-    console.log('Conference relationships fetched:', response.data);
-    
-    // Fix the data structure to match what the component expects
-    if (response.data && response.data.attendee_conferences) {
-      // Map attendees to attendee property for compatibility
-      response.data.attendee_conferences = response.data.attendee_conferences.map((ac: any) => ({
-        ...ac,
-        attendee: ac.attendees
-      }));
-    }
+    try {
+      // Fetch the conference with attendee relationships
+      const response = await supabase
+        .from('conferences')
+        .select(`
+          *,
+          attendee_conferences (
+            id,
+            attendee_id,
+            conference_id,
+            attendees:attendees (
+              id, 
+              first_name, 
+              last_name, 
+              title, 
+              company, 
+              email
+            )
+          )
+        `)
+        .eq('id', conferenceId)
+        .single();
       
-    return {
-      data: response.data,
-      error: response.error
-    };
+      console.log('Conference relationships fetched:', response.data);
+      
+      if (response.error) {
+        console.error('Error fetching conference data:', response.error);
+        return {
+          data: null,
+          error: response.error
+        };
+      }
+      
+      // Ensure the data structure is consistent by always having attendees property
+      if (response.data && response.data.attendee_conferences) {
+        // Make sure all attendee_conferences have properly structured attendees data
+        response.data.attendee_conferences = response.data.attendee_conferences.map((ac: any) => {
+          // Make sure we always have both attendee and attendees references
+          return {
+            ...ac,
+            attendee: ac.attendees // Add attendee reference for backward compatibility
+          };
+        });
+      }
+      
+      return {
+        data: response.data,
+        error: null
+      };
+    } catch (err) {
+      console.error('Error in fetchConferenceWithRelationships:', err);
+      return {
+        data: null,
+        error: err instanceof Error ? err : new Error('Unknown error fetching conference data')
+      };
+    }
+  };
+
+  // Handle successful update
+  const handleUpdate = (updatedConference: Conference) => {
+    setFullConference(updatedConference);
+    if (onUpdate) {
+      onUpdate(updatedConference);
+    }
   };
 
   return (
-    <EntityDetail
-      entity={conference}
-      entityType="conference"
-      tableName="conferences"
-      iconColor="secondary"
-      fields={conferenceFields}
-      tags={conferenceTags}
-      title={(entity) => (entity as Conference).name}
-      onUpdate={onUpdate as (updatedEntity: any) => void}
-      onDelete={onDelete}
-      fetchWithRelationships={fetchConferenceWithRelationships}
-      isNewEntity={isNewEntity}
-    />
+    <div>
+      {loading && (
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700">Loading conference data...</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <EntityDetail
+        entity={fullConference}
+        entityType="conference"
+        tableName="conferences"
+        iconColor="secondary"
+        fields={conferenceFields}
+        tags={conferenceTags}
+        title={(entity) => (entity as Conference).name}
+        onUpdate={handleUpdate as (updatedEntity: EntityTypes) => void}
+        onDelete={onDelete}
+        fetchWithRelationships={fetchConferenceWithRelationships}
+        isNewEntity={isNewEntity}
+      />
+    </div>
   );
 }; 

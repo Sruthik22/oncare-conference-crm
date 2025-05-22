@@ -1,11 +1,11 @@
 import { 
   BuildingOfficeIcon, 
-  MapPinIcon, 
-  LinkIcon,
-  IdentificationIcon,
+  GlobeAltIcon, 
+  MapPinIcon,
   UserIcon
 } from '@heroicons/react/24/outline'
-import type { HealthSystem } from '@/types'
+import { useState, useEffect } from 'react'
+import type { HealthSystem, Attendee } from '@/types'
 import { EntityDetail, FieldDefinition, TagDefinition, EntityTypes } from '@/components/features/entities/EntityDetail'
 import { supabase } from '@/lib/supabase'
 
@@ -14,7 +14,6 @@ interface HealthSystemDetailAdapterProps {
   onUpdate?: (updatedHealthSystem: HealthSystem) => void
   onDelete?: (deletedHealthSystemId: string) => void
   onAttendeeClick?: (attendeeId: string) => void
-  linkedAttendees?: Array<{id: string, first_name: string, last_name: string}>
   isNewEntity?: boolean
 }
 
@@ -23,13 +22,47 @@ export const HealthSystemDetailAdapter = ({
   onUpdate,
   onDelete,
   onAttendeeClick,
-  linkedAttendees = [],
   isNewEntity = false
 }: HealthSystemDetailAdapterProps) => {
-  // Define the fields for the health system
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [fullHealthSystem, setFullHealthSystem] = useState<HealthSystem>(healthSystem)
+
+  // Load full health system data when component mounts
+  useEffect(() => {
+    const loadHealthSystemData = async () => {
+      // Skip for new entities
+      if (isNewEntity || !healthSystem.id || healthSystem.id === 'new') {
+        return
+      }
+
+      try {
+        setLoading(true)
+        setError(null)
+        
+        const result = await fetchHealthSystemWithRelationships(healthSystem.id)
+        
+        if (result.error) {
+          console.error('Error loading health system data:', result.error)
+          setError('Failed to load complete health system data')
+        } else if (result.data) {
+          setFullHealthSystem(result.data)
+        }
+      } catch (err) {
+        console.error('Error in loadHealthSystemData:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load health system data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadHealthSystemData()
+  }, [healthSystem.id, isNewEntity])
+
+  // Define health system fields
   const healthSystemFields: FieldDefinition[] = [
     {
-      icon: IdentificationIcon,
+      icon: BuildingOfficeIcon,
       label: 'Definitive ID',
       key: 'definitive_id',
       type: 'text',
@@ -37,42 +70,41 @@ export const HealthSystemDetailAdapter = ({
       editable: true
     },
     {
-      icon: BuildingOfficeIcon,
-      label: 'Address',
-      key: 'address',
-      type: 'text',
-      placeholder: 'Street Address',
-      editable: true,
-    },
-    {
-      icon: MapPinIcon,
-      label: 'City / State',
-      key: 'city.state',
-      type: 'text',
-      placeholder: 'City, State',
-      editable: true,
-    },
-    {
-      icon: MapPinIcon,
-      label: 'ZIP Code',
-      key: 'zip',
-      type: 'text',
-      placeholder: 'ZIP Code',
-      editable: true,
-    },
-    {
-      icon: LinkIcon,
+      icon: GlobeAltIcon,
       label: 'Website',
       key: 'website',
       type: 'url',
-      placeholder: 'Website URL',
-      editable: true,
-      linkable: true
+      placeholder: 'Website',
+      editable: true
+    },
+    {
+      icon: MapPinIcon,
+      label: 'Address',
+      key: 'address',
+      type: 'text',
+      placeholder: 'Address',
+      editable: true
+    },
+    {
+      icon: MapPinIcon,
+      label: 'City, State',
+      key: 'city.state',
+      type: 'text',
+      placeholder: 'City, State',
+      editable: true
+    },
+    {
+      icon: MapPinIcon,
+      label: 'Zip',
+      key: 'zip',
+      type: 'text',
+      placeholder: 'Zip Code',
+      editable: true
     }
   ];
 
   // Function to remove attendee from health system
-  const removeAttendee = async (attendee: any) => {    
+  const removeAttendee = async (attendee: Attendee) => {
     // Update the attendee to remove the health system link
     const { error } = await supabase
       .from('attendees')
@@ -85,7 +117,7 @@ export const HealthSystemDetailAdapter = ({
   };
   
   // Function to add attendee to health system
-  const addAttendee = async (entity: EntityTypes, attendee: any) => {
+  const addAttendee = async (entity: EntityTypes, attendee: Attendee) => {
     const healthSystem = entity as HealthSystem;
     
     // Update the attendee to link it to this health system
@@ -99,50 +131,77 @@ export const HealthSystemDetailAdapter = ({
     return;
   };
   
-  // Function to get available attendees (ones that aren't currently linked to this health system)
+  // Function to get available attendees (ones that aren't already linked to this health system)
   const getAvailableAttendees = async (entity: EntityTypes) => {
     const healthSystem = entity as HealthSystem;
     
-    // Get all attendees that are not linked to this health system or any health system
-    const { data, error } = await supabase
-      .from('attendees')
-      .select('id, first_name, last_name, title, company')
-      .or(`health_system_id.is.null,health_system_id.neq.${healthSystem.id}`)
-      .order('last_name');
-    
-    if (error) throw error;
-    return data || [];
+    try {
+      // Get all attendees that aren't linked to this health system (or any health system)
+      const { data, error } = await supabase
+        .from('attendees')
+        .select(`
+          id, 
+          first_name, 
+          last_name, 
+          title, 
+          company, 
+          email
+        `)
+        .or(`health_system_id.is.null,health_system_id.neq.${healthSystem.id}`)
+        .order('last_name');
+      
+      if (error) {
+        console.error('Error fetching available attendees:', error);
+        throw error;
+      }
+      
+      console.log('Available attendees fetched:', data?.length || 0);
+      
+      return data || [];
+    } catch (err) {
+      console.error('Error in getAvailableAttendees:', err);
+      throw err;
+    }
   };
 
-  // Define the tags for linked entities
+  // Define tags for attendees
   const healthSystemTags: TagDefinition[] = [
     {
       key: 'attendees',
-      getItems: () => {
-        // Use the pre-fetched attendees or fetch them when needed
-        return linkedAttendees || [];
+      getItems: (entity) => {
+        const healthSystem = entity as HealthSystem;
+        return healthSystem.attendees || [];
       },
-      getLabel: (item) => `${item.first_name} ${item.last_name}`,
+      getLabel: (item) => {
+        return `${item.first_name} ${item.last_name}`;
+      },
       getColor: () => 'bg-blue-100 text-blue-800 hover:bg-blue-200',
       icon: UserIcon,
+      labelKey: 'Attendees',
       onClick: (item) => {
+        console.log('Attendee item clicked:', item);
+        // For health systems, the attendee item should already have the ID directly
         if (onAttendeeClick) {
-          onAttendeeClick(item.id);
+          if (item.id) {
+            console.log('Navigating to attendee with ID:', item.id);
+            onAttendeeClick(item.id);
+          } else {
+            console.error('No valid attendee ID found in clicked item:', item);
+          }
         }
       },
-      labelKey: 'Attendees',
       // Add tag management capabilities
       removable: true,
       onRemove: removeAttendee,
       addable: true,
-      onAdd: (entity, item) => addAttendee(entity, item),
+      onAdd: addAttendee,
       getAvailableItems: getAvailableAttendees,
       getItemDisplayLabel: (item: { first_name: string; last_name: string; company?: string }) => 
         `${item.first_name} ${item.last_name}${item.company ? ` (${item.company})` : ''}`
     }
   ];
 
-  // Function to fetch a health system with all its relationships
+  // Function to fetch health system with all relationships
   const fetchHealthSystemWithRelationships = async (healthSystemId: string) => {
     // If this is a new entity that hasn't been saved yet, return a safe result
     if (isNewEntity || healthSystemId === 'new') {
@@ -152,55 +211,117 @@ export const HealthSystemDetailAdapter = ({
       };
     }
     
-    // Fetch the health system
-    const response = await supabase
-      .from('health_systems')
-      .select('*')
-      .eq('id', healthSystemId)
-      .single();
-    
-    if (response.error) {
-      return {
-        data: null,
-        error: response.error
-      };
-    }
-    
-    // Combine with provided linked attendees if any
-    if (linkedAttendees && linkedAttendees.length > 0) {
-      response.data.attendees = linkedAttendees;
-    } else {
-      // Fetch attendees linked to this health system
+    try {
+      // Fetch health system data
+      const healthSystemResponse = await supabase
+        .from('health_systems')
+        .select('*')
+        .eq('id', healthSystemId)
+        .single();
+      
+      if (healthSystemResponse.error) {
+        console.error('Error fetching health system data:', healthSystemResponse.error);
+        return {
+          data: null,
+          error: healthSystemResponse.error
+        };
+      }
+      
+      // Fetch attendees linked to this health system with complete data
       const attendeesResponse = await supabase
         .from('attendees')
-        .select('id, first_name, last_name, title, company')
-        .eq('health_system_id', healthSystemId);
+        .select(`
+          id, 
+          first_name, 
+          last_name, 
+          title, 
+          company, 
+          email, 
+          phone,
+          certifications
+        `)
+        .eq('health_system_id', healthSystemId)
+        .order('last_name');
       
-      if (!attendeesResponse.error) {
-        response.data.attendees = attendeesResponse.data || [];
+      if (attendeesResponse.error) {
+        console.error('Error fetching attendees data:', attendeesResponse.error);
+        return {
+          data: healthSystemResponse.data,
+          error: attendeesResponse.error
+        };
       }
+      
+      console.log('Health system relationships fetched:', {
+        healthSystem: healthSystemResponse.data,
+        attendees: attendeesResponse.data || []
+      });
+      
+      // Combine the data
+      const data = {
+        ...healthSystemResponse.data,
+        attendees: attendeesResponse.data || []
+      };
+      
+      return {
+        data,
+        error: null
+      };
+    } catch (err) {
+      console.error('Error in fetchHealthSystemWithRelationships:', err);
+      return {
+        data: null,
+        error: err instanceof Error ? err : new Error('Unknown error fetching health system data')
+      };
     }
-    
-    return {
-      data: response.data,
-      error: null
-    };
+  };
+
+  // Handle successful update
+  const handleUpdate = (updatedHealthSystem: HealthSystem) => {
+    setFullHealthSystem(updatedHealthSystem);
+    if (onUpdate) {
+      onUpdate(updatedHealthSystem);
+    }
   };
 
   return (
-    <EntityDetail
-      entity={healthSystem}
-      entityType="healthSystem"
-      tableName="health_systems"
-      iconColor="accent"
-      fields={healthSystemFields}
-      tags={healthSystemTags}
-      title={(entity) => (entity as HealthSystem).name}
-      subtitle={(entity) => `${(entity as HealthSystem).city || ''}, ${(entity as HealthSystem).state || ''}`}
-      onUpdate={onUpdate as (updatedEntity: any) => void}
-      onDelete={onDelete}
-      fetchWithRelationships={fetchHealthSystemWithRelationships}
-      isNewEntity={isNewEntity}
-    />
+    <div>
+      {loading && (
+        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-700">Loading health system data...</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
+          <div className="flex">
+            <div className="ml-3">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <EntityDetail
+        entity={fullHealthSystem}
+        entityType="healthSystem"
+        tableName="health_systems"
+        iconColor="secondary"
+        fields={healthSystemFields}
+        tags={healthSystemTags}
+        title={(entity) => (entity as HealthSystem).name}
+        subtitle={(entity) => `${(entity as HealthSystem).city || ''}, ${(entity as HealthSystem).state || ''}`.replace(', ,', '').replace(/^, /, '').replace(/, $/, '')}
+        onUpdate={handleUpdate as (updatedEntity: EntityTypes) => void}
+        onDelete={onDelete}
+        fetchWithRelationships={fetchHealthSystemWithRelationships}
+        isNewEntity={isNewEntity}
+      />
+    </div>
   );
 }; 

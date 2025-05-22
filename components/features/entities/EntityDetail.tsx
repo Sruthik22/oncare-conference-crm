@@ -102,6 +102,8 @@ export const EntityDetail = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showDeleteResults, setShowDeleteResults] = useState(false)
   const [deleteResults, setDeleteResults] = useState<EntityDeleteResult[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [currentEntity, setCurrentEntity] = useState<EntityTypes>(entity)
   
   // New state for tag management
   const [availableTagItems, setAvailableTagItems] = useState<Record<string, any[]>>({})
@@ -109,6 +111,50 @@ export const EntityDetail = ({
   const [showTagSelection, setShowTagSelection] = useState(false)
   const [selectedTagItem, setSelectedTagItem] = useState<any | null>(null)
   const [isTagActionInProgress, setIsTagActionInProgress] = useState(false)
+
+  // Fetch complete entity data when component mounts
+  useEffect(() => {
+    const loadEntityData = async () => {
+      // Skip for new entities or when adapter-provided fetch function is not available
+      if (isNewEntity || !entity.id || entity.id === 'new' || !fetchWithRelationships) {
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        const result = await fetchWithRelationships(entity.id);
+        const data = result.data;
+        const fetchError = result.error;
+        
+        if (fetchError) {
+          console.error(`Error fetching complete ${entityType} data:`, fetchError);
+          setError(`Failed to load complete ${entityType} data`);
+        } else if (data) {
+          // Update the current entity with complete data
+          setCurrentEntity(data);
+          // Also update edit data if we're in edit mode
+          if (isEditing) {
+            setEditData(data);
+          }
+          console.log(`Loaded complete ${entityType} data:`, data);
+        }
+      } catch (err) {
+        console.error(`Error in loadEntityData for ${entityType}:`, err);
+        setError(err instanceof Error ? err.message : `Failed to load ${entityType} data`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadEntityData();
+  }, [entity.id, entityType, isNewEntity, fetchWithRelationships, isEditing]);
+
+  // Update currentEntity when entity prop changes
+  useEffect(() => {
+    setCurrentEntity(entity);
+  }, [entity]);
 
   // Fetch available tag items when needed
   useEffect(() => {
@@ -124,7 +170,7 @@ export const EntityDetail = ({
       for (const tagDef of tags) {
         if (tagDef.addable && tagDef.getAvailableItems) {
           try {
-            const items = await tagDef.getAvailableItems(entity);
+            const items = await tagDef.getAvailableItems(currentEntity);
             tagItems[tagDef.key] = items;
           } catch (err) {
             console.error(`Error fetching available items for ${tagDef.key}:`, err);
@@ -139,7 +185,7 @@ export const EntityDetail = ({
     if (tags.some(tag => tag.addable)) {
       fetchAvailableItems();
     }
-  }, [entity, tags, isNewEntity]);
+  }, [currentEntity, tags, isNewEntity]);
 
   // Handle adding a tag
   const handleAddTag = (tagKey: string) => {
@@ -164,7 +210,7 @@ export const EntityDetail = ({
     // Immediately fetch available items for this tag type
     const tagDef = tags.find(t => t.key === tagKey);
     if (tagDef?.addable && tagDef?.getAvailableItems) {
-      tagDef.getAvailableItems(entity)
+      tagDef.getAvailableItems(currentEntity)
         .then(items => {
           setAvailableTagItems(prev => ({
             ...prev,
@@ -255,11 +301,11 @@ export const EntityDetail = ({
       }
       
       // For existing entities, call the onAdd function provided by the tag definition
-      await tagDef.onAdd(entity, selectedTagItem);
+      await tagDef.onAdd(currentEntity, selectedTagItem);
       
       // If it's not certifications, refresh available items
       if (isAddingTag !== 'certifications' && tagDef.getAvailableItems) {
-        const items = await tagDef.getAvailableItems(entity);
+        const items = await tagDef.getAvailableItems(currentEntity);
         setAvailableTagItems(prev => ({
           ...prev,
           [tagDef.key]: items
@@ -271,77 +317,14 @@ export const EntityDetail = ({
         let data;
         let fetchError;
         
-        // Use adapter-provided function if available, otherwise use type-specific queries
+        // Always use adapter-provided function if available
         if (fetchWithRelationships) {
-          const result = await fetchWithRelationships(entity.id);
+          const result = await fetchWithRelationships(currentEntity.id);
           data = result.data;
           fetchError = result.error;
         } else {
-          // Fallback to type-specific queries if no custom fetch function provided
-          if (entityType === 'attendee') {
-            // For attendees, get health systems and conference relationships
-            const response = await supabase
-              .from(tableName)
-              .select('*, health_systems(*), attendee_conferences(*, conferences(*))')
-              .eq('id', entity.id)
-              .single();
-              
-            data = response.data;
-            fetchError = response.error;
-          } else if (entityType === 'conference') {
-            // For conferences, get attendee relationships
-            const response = await supabase
-              .from(tableName)
-              .select('*, attendee_conferences(id, attendee_id, conference_id, attendees:attendees(id, first_name, last_name))')
-              .eq('id', entity.id)
-              .single();
-            
-            // Map the data structure to match what the component expects
-            if (response.data && response.data.attendee_conferences) {
-              response.data.attendee_conferences = response.data.attendee_conferences.map((ac: any) => ({
-                ...ac,
-                attendee: ac.attendees
-              }));
-            }
-              
-            data = response.data;
-            fetchError = response.error;
-          } else if (entityType === 'healthSystem') {
-            // For health systems, get attendee relationships
-            const healthSystemResponse = await supabase
-              .from(tableName)
-              .select('*')
-              .eq('id', entity.id)
-              .single();
-            
-            if (healthSystemResponse.error) {
-              fetchError = healthSystemResponse.error;
-            } else {
-              // Fetch attendees linked to this health system
-              const attendeesResponse = await supabase
-                .from('attendees')
-                .select('id, first_name, last_name, title, company')
-                .eq('health_system_id', entity.id);
-              
-              if (attendeesResponse.error) {
-                fetchError = attendeesResponse.error;
-              } else {
-                // Combine the data
-                data = healthSystemResponse.data;
-                data.attendees = attendeesResponse.data || [];
-              }
-            }
-          } else {
-            // For other entity types, just get the entity
-            const response = await supabase
-              .from(tableName)
-              .select('*')
-              .eq('id', entity.id)
-              .single();
-              
-            data = response.data;
-            fetchError = response.error;
-          }
+          console.error(`No fetchWithRelationships function provided for ${entityType}`);
+          return;
         }
         
         if (fetchError) {
@@ -390,84 +373,21 @@ export const EntityDetail = ({
     
     try {
       // Call the onRemove function provided by the tag definition
-      await tagDef.onRemove(item, entity);
+      await tagDef.onRemove(item, currentEntity);
       
       // If update was successful and there's an onUpdate callback, refetch the entity
       if (onUpdate) {
         let data;
         let fetchError;
         
-        // Use adapter-provided function if available, otherwise use type-specific queries
+        // Always use adapter-provided function if available
         if (fetchWithRelationships) {
-          const result = await fetchWithRelationships(entity.id);
+          const result = await fetchWithRelationships(currentEntity.id);
           data = result.data;
           fetchError = result.error;
         } else {
-          // Fallback to type-specific queries if no custom fetch function provided
-          if (entityType === 'attendee') {
-            // For attendees, get health systems and conference relationships
-            const response = await supabase
-              .from(tableName)
-              .select('*, health_systems(*), attendee_conferences(*, conferences(*))')
-              .eq('id', entity.id)
-              .single();
-              
-            data = response.data;
-            fetchError = response.error;
-          } else if (entityType === 'conference') {
-            // For conferences, get attendee relationships
-            const response = await supabase
-              .from(tableName)
-              .select('*, attendee_conferences(id, attendee_id, conference_id, attendees:attendees(id, first_name, last_name))')
-              .eq('id', entity.id)
-              .single();
-            
-            // Map the data structure to match what the component expects
-            if (response.data && response.data.attendee_conferences) {
-              response.data.attendee_conferences = response.data.attendee_conferences.map((ac: any) => ({
-                ...ac,
-                attendee: ac.attendees
-              }));
-            }
-              
-            data = response.data;
-            fetchError = response.error;
-          } else if (entityType === 'healthSystem') {
-            // For health systems, get attendee relationships
-            const healthSystemResponse = await supabase
-              .from(tableName)
-              .select('*')
-              .eq('id', entity.id)
-              .single();
-            
-            if (healthSystemResponse.error) {
-              fetchError = healthSystemResponse.error;
-            } else {
-              // Fetch attendees linked to this health system
-              const attendeesResponse = await supabase
-                .from('attendees')
-                .select('id, first_name, last_name, title, company')
-                .eq('health_system_id', entity.id);
-              
-              if (attendeesResponse.error) {
-                fetchError = attendeesResponse.error;
-              } else {
-                // Combine the data
-                data = healthSystemResponse.data;
-                data.attendees = attendeesResponse.data || [];
-              }
-            }
-          } else {
-            // For other entity types, just get the entity
-            const response = await supabase
-              .from(tableName)
-              .select('*')
-              .eq('id', entity.id)
-              .single();
-              
-            data = response.data;
-            fetchError = response.error;
-          }
+          console.error(`No fetchWithRelationships function provided for ${entityType}`);
+          return;
         }
         
         if (fetchError) {
@@ -500,7 +420,7 @@ export const EntityDetail = ({
 
   // Handle edit click
   const handleEditClick = () => {
-    setEditData({ ...entity })
+    setEditData({ ...currentEntity })
     setIsEditing(true)
   }
 
@@ -611,7 +531,7 @@ export const EntityDetail = ({
       const { error: deleteError } = await supabase
         .from(tableName)
         .delete()
-        .eq('id', entity.id)
+        .eq('id', currentEntity.id)
       
       if (deleteError) {
         console.error(`Supabase delete error:`, deleteError)
@@ -619,7 +539,7 @@ export const EntityDetail = ({
         // Store the failure result
         setDeleteResults([
           {
-            entity,
+            entity: currentEntity,
             entityType,
             success: false,
             error: deleteError.message
@@ -632,7 +552,7 @@ export const EntityDetail = ({
       // Store the success result
       setDeleteResults([
         {
-          entity,
+          entity: currentEntity,
           entityType,
           success: true
         }
@@ -643,7 +563,7 @@ export const EntityDetail = ({
       
       // If delete was successful and there's an onDelete callback, call it
       if (onDelete) {
-        onDelete(entity.id)
+        onDelete(currentEntity.id)
       }
     } catch (err) {
       console.error('Delete error:', err)
@@ -733,7 +653,7 @@ export const EntityDetail = ({
     try {
       await enrichAttendee(
         enrichedData,
-        [entity as Attendee],
+        [currentEntity as Attendee],
         (updatedAttendees: Attendee[]) => {
           if (updatedAttendees.length > 0) {
             // Update the local attendee state with the enriched data
@@ -810,11 +730,11 @@ export const EntityDetail = ({
             const tagDef = tags.find(t => t.key === 'certifications');
             if (tagDef && tagDef.onAdd) {
               // Add certification directly
-              tagDef.onAdd(entity, { name: certName })
+              tagDef.onAdd(currentEntity, { name: certName })
                 .then(() => {
                   // If update was successful and there's an onUpdate callback, refetch the entity
                   if (onUpdate && fetchWithRelationships) {
-                    return fetchWithRelationships(entity.id);
+                    return fetchWithRelationships(currentEntity.id);
                   }
                   return { data: null, error: null };
                 })
@@ -887,7 +807,7 @@ export const EntityDetail = ({
                         <p className="text-sm text-gray-500">
                           {isCertification 
                             ? 'Enter a new certification to add'
-                            : `Select a ${tagDef.labelKey.toLowerCase()} to add to ${title(entity)}`
+                            : `Select a ${tagDef.labelKey.toLowerCase()} to add to ${title(currentEntity)}`
                           }
                         </p>
                       </div>
@@ -987,227 +907,6 @@ export const EntityDetail = ({
       .replace(/([A-Z])/g, ' $1')
       .replace(/^./, (str) => str.toUpperCase());
 
-  if (isEditing && editData) {
-    // Edit mode - render form with inputs
-    return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-        {error && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 m-6 mb-0">
-            <div className="flex">
-              <div className="ml-3">
-                <p className="text-sm text-red-700 font-medium">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        <div className="border-b border-gray-200 p-6">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <div className={`h-12 w-12 rounded-full ${getIconBgColor()} flex items-center justify-center`}>
-                <Icon icon={getEntityIcon()} size="md" className={getIconTextColor()} />
-              </div>
-              <div>
-                {/* Special handling for attendee first/last name */}
-                {entityType === 'attendee' ? (
-                  <div className="flex gap-2">
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        name="first_name"
-                        value={(editData as Attendee).first_name || ''}
-                        onChange={handleInputChange}
-                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                        placeholder="First Name"
-                      />
-                    </div>
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        name="last_name"
-                        value={(editData as Attendee).last_name || ''}
-                        onChange={handleInputChange}
-                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                        placeholder="Last Name"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        name={Object.keys(entity).find(key => title(entity).includes((entity as any)[key])) || 'name'}
-                        value={title(editData)}
-                        onChange={handleInputChange}
-                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                        placeholder={`${entityType} Name`}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="flex gap-3">
-              <button 
-                onClick={handleCancelEdit}
-                className="inline-flex items-center gap-x-1.5 rounded-md bg-white px-2.5 py-1.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                disabled={isSaving}
-              >
-                <XCircleIcon className="-ml-0.5 h-5 w-5" aria-hidden="true" />
-                Cancel
-              </button>
-              <button 
-                onClick={handleSaveChanges}
-                className="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <>
-                    <svg className="-ml-0.5 h-5 w-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircleIcon className="-ml-0.5 h-5 w-5" aria-hidden="true" />
-                    Save
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        <div className="px-6 py-5 divide-y divide-gray-200">
-          {fields.map((field, index) => {
-            return (
-              <div key={index} className="grid grid-cols-3 gap-6 py-4">
-                <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-2' : 'center'}`}>
-                  <field.icon className="h-5 w-5 text-gray-400 mr-2" />
-                  <label htmlFor={field.key} className="block text-sm font-medium text-gray-700">{field.label}</label>
-                </div>
-                <div className="col-span-2">
-                  {field.type === 'textarea' ? (
-                    <div className="mt-2">
-                      <textarea
-                        name={field.key}
-                        id={field.key}
-                        rows={3}
-                        value={(editData as any)[field.key] || ''}
-                        onChange={handleInputChange}
-                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                        placeholder={field.placeholder || `Add ${field.label.toLowerCase()}`}
-                      />
-                    </div>
-                  ) : field.key.includes('.') ? (
-                    // Handle nested objects like city/state
-                    <div className="grid grid-cols-2 gap-4">
-                      {field.key.split('.').map((nestedKey, nestedIdx) => (
-                        <div key={nestedIdx} className="mt-2">
-                          <input
-                            type={field.type || 'text'}
-                            name={nestedKey}
-                            id={nestedKey}
-                            value={(editData as any)[nestedKey] || ''}
-                            onChange={handleInputChange}
-                            className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                            placeholder={field.placeholder?.split(',')[nestedIdx] || nestedKey}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-2">
-                      <input
-                        type={field.type || 'text'}
-                        name={field.key}
-                        id={field.key}
-                        value={(editData as any)[field.key] || ''}
-                        onChange={handleInputChange}
-                        className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
-                        placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          
-          {/* Show tags in edit mode with ability to add/remove them */}
-          {tags.map((tagDef, tagIdx) => {
-            const items = tagDef.getItems(entity);
-            
-            return (
-              <div key={tagIdx} className="grid grid-cols-3 gap-4 py-4">
-                <div className="col-span-1 flex items-center">
-                  <tagDef.icon className="h-5 w-5 text-gray-400 mr-2" />
-                  <span className="text-sm font-medium text-gray-500">{tagDef.labelKey}</span>
-                </div>
-                <div className="col-span-2">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    {items && items.length > 0 ? items.map((item, idx) => (
-                      <span 
-                        key={idx} 
-                        className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${tagDef.onClick ? 'cursor-pointer' : ''} ${tagDef.getColor(idx)}`}
-                      >
-                        <div className="flex items-center">
-                          <tagDef.icon className="h-4 w-4 mr-1" />
-                          <span onClick={() => tagDef.onClick ? tagDef.onClick(item) : null}>
-                            {tagDef.getLabel(item)}
-                          </span>
-                          {tagDef.removable && (
-                            <button
-                              onClick={() => handleRemoveTag(tagDef, item)}
-                              className="ml-1 hover:text-red-700"
-                              disabled={isTagActionInProgress}
-                              title="Remove"
-                            >
-                              <XMarkIcon className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </span>
-                    )) : (
-                      <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
-                    )}
-                    
-                    {tagDef.addable && (
-                      <button
-                        onClick={() => handleAddTag(tagDef.key)}
-                        className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200"
-                        disabled={isTagActionInProgress}
-                      >
-                        <PlusCircleIcon className="h-4 w-4 mr-1" />
-                        Add {tagDef.labelKey}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* Show Apollo Integration in edit mode too */}
-        {showApolloIntegration && entityType === 'attendee' && (
-          <div className="px-6 py-5 border-t border-gray-200">
-            <ApolloIntegration
-              selectedAttendees={[entity as Attendee]}
-              conferenceName={conferenceName || 'Unknown Conference'}
-              onEnrichmentComplete={handleEnrichmentComplete}
-            />
-          </div>
-        )}
-      </div>
-    )
-  }
-  
-  // View mode - render in description list format
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
       {error && (
@@ -1220,180 +919,414 @@ export const EntityDetail = ({
         </div>
       )}
       
-      <div className="border-b border-gray-200 p-6">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className={`h-12 w-12 rounded-full ${getIconBgColor()} flex items-center justify-center`}>
-              <Icon icon={getEntityIcon()} size="md" className={getIconTextColor()} />
-            </div>
-            <div>
-              <h2 className="text-xl font-medium text-gray-900">
-                {title(entity)}
-              </h2>
-              {subtitle && subtitle(entity) && (
-                <p className="text-gray-500">{subtitle(entity)}</p>
-              )}
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={handleEditClick}
-              className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"
-              title="Edit"
-            >
-              <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
-              <span className="sr-only">Edit</span>
-            </button>
-            {onDelete && (
-              <button 
-                onClick={() => setShowDeleteConfirm(true)}
-                className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-red-500 shadow-sm border border-gray-200 hover:text-red-700 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                title="Delete"
-              >
-                <XCircleIcon className="h-4 w-4" aria-hidden="true" />
-                <span className="sr-only">Delete</span>
-              </button>
-            )}
-          </div>
+      {isLoading ? (
+        <div className="p-8 flex justify-center items-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-600 border-t-transparent"></div>
+          <span className="ml-3 text-gray-600">Loading {entityType} data...</span>
         </div>
-      </div>
-      
-      <div className="px-6 py-5 divide-y divide-gray-200">
-        {/* First render the defined fields */}
-        {fields.map((field, index) => {
-          // Get field value 
-          const value = (entity as any)[field.key];
-          
-          // Always render fields (even when empty) if editable is true
-          const shouldRenderField = value || field.editable === true;
-          if (!shouldRenderField) return null;
-          
-          return (
-            <div key={index} className="grid grid-cols-3 gap-4 py-4">
-              <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-1' : 'center'}`}>
-                <field.icon className="h-5 w-5 text-gray-400 mr-2" />
-                <span className="text-sm font-medium text-gray-500">{field.label}</span>
-              </div>
-              <div className="col-span-2 text-sm">
-                {field.render ? (
-                  field.render(value, entity)
-                ) : field.type === 'email' ? (
-                  value ? <a href={`mailto:${value}`} className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
-                ) : field.type === 'phone' ? (
-                  value ? <a href={`tel:${value}`} className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
-                ) : field.type === 'url' ? (
-                  value ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
-                ) : field.type === 'date' ? (
-                  value ? new Date(value).toLocaleDateString() : '-'
-                ) : field.type === 'textarea' ? (
-                  value ? (
-                    <div className="bg-gray-50 p-3 rounded-md">
-                      <p className="whitespace-pre-line text-gray-700">{value}</p>
-                    </div>
-                  ) : '-'
-                ) : (
-                  <span className="text-gray-900">{value || '-'}</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Then render the tags */}
-        {tags.map((tagDef, tagIdx) => {
-          const items = tagDef.getItems(entity);
-          
-          return (
-            <div key={tagIdx} className="grid grid-cols-3 gap-4 py-4">
-              <div className="col-span-1 flex items-center">
-                <tagDef.icon className="h-5 w-5 text-gray-400 mr-2" />
-                <span className="text-sm font-medium text-gray-500">{tagDef.labelKey}</span>
-              </div>
-              <div className="col-span-2">
-                <div className="flex flex-wrap gap-2 items-center">
-                  {items && items.length > 0 ? items.map((item, idx) => (
-                    <span 
-                      key={idx} 
-                      className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${tagDef.onClick ? 'cursor-pointer' : ''} ${tagDef.getColor(idx)}`}
-                    >
-                      <div className="flex items-center">
-                        <tagDef.icon className="h-4 w-4 mr-1" />
-                        <span onClick={() => tagDef.onClick ? tagDef.onClick(item) : null}>
-                          {tagDef.getLabel(item)}
-                        </span>
-                        {tagDef.removable && (
-                          <button
-                            onClick={() => handleRemoveTag(tagDef, item)}
-                            className="ml-1 hover:text-red-700"
-                            disabled={isTagActionInProgress}
-                            title="Remove"
-                          >
-                            <XMarkIcon className="h-4 w-4" />
-                          </button>
-                        )}
+      ) : isEditing && editData ? (
+        // Edit mode - render form with inputs
+        <div>
+          <div className="border-b border-gray-200 p-6">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-full ${getIconBgColor()} flex items-center justify-center`}>
+                  <Icon icon={getEntityIcon()} size="md" className={getIconTextColor()} />
+                </div>
+                <div>
+                  {/* Special handling for attendee first/last name */}
+                  {entityType === 'attendee' ? (
+                    <div className="flex gap-2">
+                      <div className="mt-2">
+                        <input
+                          type="text"
+                          name="first_name"
+                          value={(editData as Attendee).first_name || ''}
+                          onChange={handleInputChange}
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder="First Name"
+                        />
                       </div>
-                    </span>
-                  )) : (
-                    <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
-                  )}
-                  
-                  {tagDef.addable && (
-                    <button
-                      onClick={() => handleAddTag(tagDef.key)}
-                      className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      disabled={isTagActionInProgress}
-                    >
-                      <PlusCircleIcon className="h-4 w-4 mr-1" />
-                      Add {tagDef.labelKey}
-                    </button>
+                      <div className="mt-2">
+                        <input
+                          type="text"
+                          name="last_name"
+                          value={(editData as Attendee).last_name || ''}
+                          onChange={handleInputChange}
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder="Last Name"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <div className="mt-2">
+                        <input
+                          type="text"
+                          name={Object.keys(currentEntity).find(key => title(currentEntity).includes((currentEntity as any)[key])) || 'name'}
+                          value={title(editData)}
+                          onChange={handleInputChange}
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder={`${entityType} Name`}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-          );
-        })}
-
-        {/* Finally, render any additional fields that weren't explicitly defined */}
-        {Object.entries(entity)
-          .filter(([key]) => {
-            // Skip fields that are already defined in the fields array
-            const isDefinedField = fields.some(f => f.key === key);
-            // Skip fields that are used in tags
-            const isTagField = tags.some(t => t.key === key);
-            // Skip common fields that we don't want to show
-            const isCommonField = ['id', 'created_at', 'updated_at'].includes(key);
-            return !isDefinedField && !isTagField && !isCommonField;
-          })
-          .map(([key, value]) => (
-            <div key={key} className="grid grid-cols-3 gap-4 py-4">
-              <div className="col-span-1 flex items-center">
-                <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
-                <span className="text-sm font-medium text-gray-500">{toLabel(key)}</span>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={handleCancelEdit}
+                  className="inline-flex items-center gap-x-1.5 rounded-md bg-white px-2.5 py-1.5 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                  disabled={isSaving}
+                >
+                  <XCircleIcon className="-ml-0.5 h-5 w-5" aria-hidden="true" />
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveChanges}
+                  className="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <>
+                      <svg className="-ml-0.5 h-5 w-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircleIcon className="-ml-0.5 h-5 w-5" aria-hidden="true" />
+                      Save
+                    </>
+                  )}
+                </button>
               </div>
-              <div className="col-span-2 text-sm">
-                {typeof value === 'object' ? (
-                  <div className="bg-gray-50 p-3 rounded-md">
-                    <pre className="whitespace-pre-wrap text-gray-700 text-sm overflow-x-auto">
-                      {JSON.stringify(value, null, 2)}
-                    </pre>
+            </div>
+          </div>
+          
+          <div className="px-6 py-5 divide-y divide-gray-200">
+            {fields.map((field, index) => {
+              return (
+                <div key={index} className="grid grid-cols-3 gap-6 py-4">
+                  <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-2' : 'center'}`}>
+                    <field.icon className="h-5 w-5 text-gray-400 mr-2" />
+                    <label htmlFor={field.key} className="block text-sm font-medium text-gray-700">{field.label}</label>
                   </div>
-                ) : (
-                  <span className="text-gray-900">{String(value)}</span>
+                  <div className="col-span-2">
+                    {field.type === 'textarea' ? (
+                      <div className="mt-2">
+                        <textarea
+                          name={field.key}
+                          id={field.key}
+                          rows={3}
+                          value={(editData as any)[field.key] || ''}
+                          onChange={handleInputChange}
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder={field.placeholder || `Add ${field.label.toLowerCase()}`}
+                        />
+                      </div>
+                    ) : field.key.includes('.') ? (
+                      // Handle nested objects like city/state
+                      <div className="grid grid-cols-2 gap-4">
+                        {field.key.split('.').map((nestedKey, nestedIdx) => (
+                          <div key={nestedIdx} className="mt-2">
+                            <input
+                              type={field.type || 'text'}
+                              name={nestedKey}
+                              id={nestedKey}
+                              value={(editData as any)[nestedKey] || ''}
+                              onChange={handleInputChange}
+                              className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                              placeholder={field.placeholder?.split(',')[nestedIdx] || nestedKey}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type={field.type || 'text'}
+                          name={field.key}
+                          id={field.key}
+                          value={(editData as any)[field.key] || ''}
+                          onChange={handleInputChange}
+                          className="block w-full rounded-md bg-white px-3 py-1.5 text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-primary-600 sm:text-sm/6"
+                          placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            
+            {/* Show tags in edit mode with ability to add/remove them */}
+            {tags.map((tagDef, tagIdx) => {
+              const items = tagDef.getItems(currentEntity);
+              
+              return (
+                <div key={tagIdx} className="grid grid-cols-3 gap-4 py-4">
+                  <div className="col-span-1 flex items-center">
+                    <tagDef.icon className="h-5 w-5 text-gray-400 mr-2" />
+                    <span className="text-sm font-medium text-gray-500">{tagDef.labelKey}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {items && items.length > 0 ? items.map((item, idx) => (
+                        <span 
+                          key={idx} 
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${tagDef.getColor(idx)}`}
+                        >
+                          <div className="flex items-center">
+                            <tagDef.icon className="h-4 w-4 mr-1" />
+                            <span 
+                              onClick={() => {
+                                console.log('Tag item clicked, has onClick handler:', !!tagDef.onClick);
+                                if (tagDef.onClick) {
+                                  console.log('Calling onClick handler with item:', item);
+                                  tagDef.onClick(item);
+                                }
+                              }}
+                              className={tagDef.onClick ? 'cursor-pointer hover:underline' : ''}
+                            >
+                              {tagDef.getLabel(item)}
+                            </span>
+                            {tagDef.removable && (
+                              <button
+                                onClick={() => handleRemoveTag(tagDef, item)}
+                                className="ml-1 hover:text-red-700"
+                                disabled={isTagActionInProgress}
+                                title="Remove"
+                              >
+                                <XMarkIcon className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </span>
+                      )) : (
+                        <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
+                      )}
+                      
+                      {tagDef.addable && (
+                        <button
+                          onClick={() => handleAddTag(tagDef.key)}
+                          className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          disabled={isTagActionInProgress}
+                        >
+                          <PlusCircleIcon className="h-4 w-4 mr-1" />
+                          Add {tagDef.labelKey}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Show Apollo Integration in edit mode too */}
+          {showApolloIntegration && entityType === 'attendee' && (
+            <div className="px-6 py-5 border-t border-gray-200">
+              <ApolloIntegration
+                selectedAttendees={[currentEntity as Attendee]}
+                conferenceName={conferenceName || 'Unknown Conference'}
+                onEnrichmentComplete={handleEnrichmentComplete}
+              />
+            </div>
+          )}
+        </div>
+      ) : (
+        // View mode - render in description list format
+        <div>
+          <div className="border-b border-gray-200 p-6">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-full ${getIconBgColor()} flex items-center justify-center`}>
+                  <Icon icon={getEntityIcon()} size="md" className={getIconTextColor()} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-medium text-gray-900">
+                    {title(currentEntity)}
+                  </h2>
+                  {subtitle && subtitle(currentEntity) && (
+                    <p className="text-gray-500">{subtitle(currentEntity)}</p>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={handleEditClick}
+                  className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-gray-500 shadow-sm border border-gray-200 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"
+                  title="Edit"
+                >
+                  <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
+                  <span className="sr-only">Edit</span>
+                </button>
+                {onDelete && (
+                  <button 
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="inline-flex items-center justify-center rounded-full bg-white p-1.5 text-red-500 shadow-sm border border-gray-200 hover:text-red-700 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                    title="Delete"
+                  >
+                    <XCircleIcon className="h-4 w-4" aria-hidden="true" />
+                    <span className="sr-only">Delete</span>
+                  </button>
                 )}
               </div>
             </div>
-          ))}
-      </div>
-      
-      {/* Add Apollo Integration section if needed */}
-      {showApolloIntegration && entityType === 'attendee' && (
-        <div className="px-6 py-5 border-t border-gray-200">
-          <ApolloIntegration
-            selectedAttendees={[entity as Attendee]}
-            conferenceName={conferenceName || 'Unknown Conference'}
-            onEnrichmentComplete={handleEnrichmentComplete}
-          />
+          </div>
+          
+          <div className="px-6 py-5 divide-y divide-gray-200">
+            {/* First render the defined fields */}
+            {fields.map((field, index) => {
+              // Get field value 
+              const value = (currentEntity as any)[field.key];
+              
+              // Always render fields (even when empty) if editable is true
+              const shouldRenderField = value || field.editable === true;
+              if (!shouldRenderField) return null;
+              
+              return (
+                <div key={index} className="grid grid-cols-3 gap-4 py-4">
+                  <div className={`col-span-1 flex items-${field.type === 'textarea' ? 'start pt-1' : 'center'}`}>
+                    <field.icon className="h-5 w-5 text-gray-400 mr-2" />
+                    <span className="text-sm font-medium text-gray-500">{field.label}</span>
+                  </div>
+                  <div className="col-span-2 text-sm">
+                    {field.render ? (
+                      field.render(value, currentEntity)
+                    ) : field.type === 'email' ? (
+                      value ? <a href={`mailto:${value}`} className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
+                    ) : field.type === 'phone' ? (
+                      value ? <a href={`tel:${value}`} className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
+                    ) : field.type === 'url' ? (
+                      value ? <a href={value} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:text-primary-900">{value}</a> : '-'
+                    ) : field.type === 'date' ? (
+                      value ? new Date(value).toLocaleDateString() : '-'
+                    ) : field.type === 'textarea' ? (
+                      value ? (
+                        <div className="bg-gray-50 p-3 rounded-md">
+                          <p className="whitespace-pre-line text-gray-700">{value}</p>
+                        </div>
+                      ) : '-'
+                    ) : (
+                      <span className="text-gray-900">{value || '-'}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Then render the tags */}
+            {tags.map((tagDef, tagIdx) => {
+              const items = tagDef.getItems(currentEntity);
+              
+              return (
+                <div key={tagIdx} className="grid grid-cols-3 gap-4 py-4">
+                  <div className="col-span-1 flex items-center">
+                    <tagDef.icon className="h-5 w-5 text-gray-400 mr-2" />
+                    <span className="text-sm font-medium text-gray-500">{tagDef.labelKey}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {items && items.length > 0 ? items.map((item, idx) => (
+                        <span 
+                          key={idx} 
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${tagDef.getColor(idx)}`}
+                        >
+                          <div className="flex items-center">
+                            <tagDef.icon className="h-4 w-4 mr-1" />
+                            <span 
+                              onClick={() => {
+                                console.log('Tag item clicked, has onClick handler:', !!tagDef.onClick);
+                                if (tagDef.onClick) {
+                                  console.log('Calling onClick handler with item:', item);
+                                  tagDef.onClick(item);
+                                }
+                              }}
+                              className={tagDef.onClick ? 'cursor-pointer hover:underline' : ''}
+                            >
+                              {tagDef.getLabel(item)}
+                            </span>
+                            {tagDef.removable && (
+                              <button
+                                onClick={() => handleRemoveTag(tagDef, item)}
+                                className="ml-1 hover:text-red-700"
+                                disabled={isTagActionInProgress}
+                                title="Remove"
+                              >
+                                <XMarkIcon className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </span>
+                      )) : (
+                        <span className="text-gray-500 text-sm mr-2">No {tagDef.labelKey.toLowerCase()} associated</span>
+                      )}
+                      
+                      {tagDef.addable && (
+                        <button
+                          onClick={() => handleAddTag(tagDef.key)}
+                          className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          disabled={isTagActionInProgress}
+                        >
+                          <PlusCircleIcon className="h-4 w-4 mr-1" />
+                          Add {tagDef.labelKey}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Finally, render any additional fields that weren't explicitly defined */}
+            {Object.entries(currentEntity)
+              .filter(([key]) => {
+                // Skip fields that are already defined in the fields array
+                const isDefinedField = fields.some(f => f.key === key);
+                // Skip fields that are used in tags
+                const isTagField = tags.some(t => t.key === key);
+                // Skip common fields that we don't want to show
+                const isCommonField = ['id', 'created_at', 'updated_at'].includes(key);
+                return !isDefinedField && !isTagField && !isCommonField;
+              })
+              .map(([key, value]) => (
+                <div key={key} className="grid grid-cols-3 gap-4 py-4">
+                  <div className="col-span-1 flex items-center">
+                    <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
+                    <span className="text-sm font-medium text-gray-500">{toLabel(key)}</span>
+                  </div>
+                  <div className="col-span-2 text-sm">
+                    {typeof value === 'object' ? (
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <pre className="whitespace-pre-wrap text-gray-700 text-sm overflow-x-auto">
+                          {JSON.stringify(value, null, 2)}
+                        </pre>
+                      </div>
+                    ) : (
+                      <span className="text-gray-900">{String(value)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+          </div>
+          
+          {/* Add Apollo Integration section if needed */}
+          {showApolloIntegration && entityType === 'attendee' && (
+            <div className="px-6 py-5 border-t border-gray-200">
+              <ApolloIntegration
+                selectedAttendees={[currentEntity as Attendee]}
+                conferenceName={conferenceName || 'Unknown Conference'}
+                onEnrichmentComplete={handleEnrichmentComplete}
+              />
+            </div>
+          )}
         </div>
       )}
       
@@ -1434,7 +1367,7 @@ export const EntityDetail = ({
                       </Dialog.Title>
                       <div className="mt-2">
                         <p className="text-sm text-gray-500">
-                          Are you sure you want to delete {title(entity)}? This action cannot be undone.
+                          Are you sure you want to delete {title(currentEntity)}? This action cannot be undone.
                         </p>
                       </div>
                     </div>

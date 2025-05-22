@@ -341,7 +341,8 @@ export function useDataFetching(): UseDataFetchingResult {
                 first_name,
                 last_name,
                 title,
-                company
+                company,
+                email
               )
             )
           `
@@ -375,7 +376,23 @@ export function useDataFetching(): UseDataFetchingResult {
           
           // Check if this request is still relevant (not superseded by a newer request)
           if (activeRequestRef.current !== thisRequestId) return
-  
+          
+          // Process the data to ensure consistent structure
+          if (conferencesData) {
+            conferencesData.forEach(conf => {
+              if (conf.attendee_conferences) {
+                // Make sure all attendee_conferences have properly structured attendees data
+                conf.attendee_conferences = conf.attendee_conferences.map((ac: any) => {
+                  // Add attendee reference for backward compatibility
+                  return {
+                    ...ac,
+                    attendee: ac.attendees
+                  };
+                });
+              }
+            });
+          }
+
           // Determine if there are more records
           const hasMoreConferences = (conferencesCount || 0) > (from + (conferencesData?.length || 0))
   
