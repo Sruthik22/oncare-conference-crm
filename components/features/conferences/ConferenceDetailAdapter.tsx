@@ -272,19 +272,6 @@ export const ConferenceDetailAdapter = ({
 
   return (
     <div>
-      {loading && (
-        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-blue-700">Loading conference data...</p>
-            </div>
-          </div>
-        </div>
-      )}
-      
       {error && (
         <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-4">
           <div className="flex">

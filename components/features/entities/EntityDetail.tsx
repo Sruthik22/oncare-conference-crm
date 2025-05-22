@@ -693,7 +693,6 @@ export const EntityDetail = ({
         // For certifications, set the item and immediately process it
         const certName = newCertificationName.trim();
         
-        // Set loading state
         setIsTagActionInProgress(true);
         setError(null);
         
@@ -919,12 +918,7 @@ export const EntityDetail = ({
         </div>
       )}
       
-      {isLoading ? (
-        <div className="p-8 flex justify-center items-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary-600 border-t-transparent"></div>
-          <span className="ml-3 text-gray-600">Loading {entityType} data...</span>
-        </div>
-      ) : isEditing && editData ? (
+      {isEditing && editData ? (
         // Edit mode - render form with inputs
         <div>
           <div className="border-b border-gray-200 p-6">
