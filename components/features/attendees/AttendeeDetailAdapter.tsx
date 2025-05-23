@@ -18,6 +18,7 @@ interface AttendeeConference {
   conference_id: string;
   conferences?: {
     name: string;
+    id: string;
   };
 }
 
@@ -40,7 +41,7 @@ export const AttendeeDetailAdapter = ({
   onConferenceClick,
   isNewEntity = false
 }: AttendeeDetailAdapterProps) => {
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullAttendee, setFullAttendee] = useState<Attendee>(attendee)
 

@@ -102,7 +102,6 @@ export const EntityDetail = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showDeleteResults, setShowDeleteResults] = useState(false)
   const [deleteResults, setDeleteResults] = useState<EntityDeleteResult[]>([])
-  const [isLoading, setIsLoading] = useState(false)
   const [currentEntity, setCurrentEntity] = useState<EntityTypes>(entity)
   
   // New state for tag management
@@ -121,7 +120,6 @@ export const EntityDetail = ({
       }
 
       try {
-        setIsLoading(true);
         setError(null);
         
         const result = await fetchWithRelationships(entity.id);
@@ -143,8 +141,6 @@ export const EntityDetail = ({
       } catch (err) {
         console.error(`Error in loadEntityData for ${entityType}:`, err);
         setError(err instanceof Error ? err.message : `Failed to load ${entityType} data`);
-      } finally {
-        setIsLoading(false);
       }
     };
     

@@ -23,7 +23,6 @@ export const ConferenceDetailAdapter = ({
   onAttendeeClick,
   isNewEntity = false
 }: ConferenceDetailAdapterProps) => {
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullConference, setFullConference] = useState<Conference>(conference)
 
@@ -36,7 +35,6 @@ export const ConferenceDetailAdapter = ({
       }
 
       try {
-        setLoading(true)
         setError(null)
         
         const result = await fetchConferenceWithRelationships(conference.id)
@@ -50,8 +48,6 @@ export const ConferenceDetailAdapter = ({
       } catch (err) {
         console.error('Error in loadConferenceData:', err)
         setError(err instanceof Error ? err.message : 'Failed to load conference data')
-      } finally {
-        setLoading(false)
       }
     }
 

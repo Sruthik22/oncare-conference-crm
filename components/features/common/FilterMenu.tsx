@@ -17,7 +17,7 @@ interface ColumnMeta {
   dataType?: string
 }
 
-type FilterOperator = 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
+type FilterOperator = 'equals' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
 
 interface Filter {
   id: string
@@ -38,6 +38,15 @@ interface FilterMenuProps {
 export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoading = false, activeFilters = [] }: FilterMenuProps) {
   const [filters, setFilters] = useState<Filter[]>([])
   const [activeFilter, setActiveFilter] = useState<Filter | null>(null)
+  // Separate state for columns loading - only true initially, then set to false once we have columns
+  const [columnsLoading, setColumnsLoading] = useState(true)
+  
+  // Set columnsLoading to false once allColumns is populated
+  useEffect(() => {
+    if (allColumns.length > 0) {
+      setColumnsLoading(false)
+    }
+  }, [allColumns])
 
   // Synchronize the local state with parent's activeFilters
   useEffect(() => {
@@ -117,6 +126,7 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
     if (dataType?.includes('array')) {
       return [
         { value: 'contains', label: 'Contains' },
+        { value: 'not_contains', label: 'Not contains' },
         { value: 'equals', label: 'Equals' },
         { value: 'is_empty', label: 'Is empty' },
         { value: 'is_not_empty', label: 'Is not empty' },
@@ -127,6 +137,7 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
     return [
       { value: 'equals', label: 'Equals' },
       { value: 'contains', label: 'Contains' },
+      { value: 'not_contains', label: 'Not contains' },
       { value: 'starts_with', label: 'Starts with' },
       { value: 'ends_with', label: 'Ends with' },
       { value: 'is_empty', label: 'Is empty' },
@@ -169,7 +180,7 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
               </button>
             </div>
 
-            {isLoading ? (
+            {columnsLoading && allColumns.length === 0 ? (
               <div className="text-center py-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500 mx-auto"></div>
                 <p className="mt-2 text-sm text-gray-500">Loading columns...</p>
@@ -322,9 +333,19 @@ export function FilterMenu({ onFilterChange, isOpen, onToggle, allColumns, isLoa
                 <button
                   onClick={addFilter}
                   className="w-full flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none"
+                  disabled={isLoading}
                 >
-                  <Icon icon={PlusIcon} size="xs" className="mr-2" />
-                  Add filter
+                  {isLoading ? (
+                    <span className="flex items-center">
+                      <div className="animate-spin mr-2 h-4 w-4 border-b-2 border-gray-500 rounded-full"></div>
+                      Adding...
+                    </span>
+                  ) : (
+                    <>
+                      <Icon icon={PlusIcon} size="xs" className="mr-2" />
+                      Add filter
+                    </>
+                  )}
                 </button>
               </div>
             )}

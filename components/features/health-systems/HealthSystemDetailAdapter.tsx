@@ -24,7 +24,6 @@ export const HealthSystemDetailAdapter = ({
   onAttendeeClick,
   isNewEntity = false
 }: HealthSystemDetailAdapterProps) => {
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullHealthSystem, setFullHealthSystem] = useState<HealthSystem>(healthSystem)
 
@@ -37,7 +36,6 @@ export const HealthSystemDetailAdapter = ({
       }
 
       try {
-        setLoading(true)
         setError(null)
         
         const result = await fetchHealthSystemWithRelationships(healthSystem.id)
@@ -51,8 +49,6 @@ export const HealthSystemDetailAdapter = ({
       } catch (err) {
         console.error('Error in loadHealthSystemData:', err)
         setError(err instanceof Error ? err.message : 'Failed to load health system data')
-      } finally {
-        setLoading(false)
       }
     }
 

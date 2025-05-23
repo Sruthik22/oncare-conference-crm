@@ -2,4 +2,4 @@
 export * from './DataTable';
 export * from './ItemCard';
 export * from './SearchBar';
-export * from './FilterMenu'; 
+export * from './FilterMenu';

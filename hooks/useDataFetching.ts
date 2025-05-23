@@ -9,10 +9,11 @@ interface FetchOptions {
   searchTerm?: string
   filters?: Array<{
     property: string
-    operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than'
+    operator: 'equals' | 'contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | 'greater_than' | 'less_than' | 'not_contains'
     value: string
   }>
   entityType?: 'attendees' | 'health-systems' | 'conferences'
+  listId?: string | null
 }
 
 interface UseDataFetchingResult {
@@ -30,6 +31,7 @@ interface UseDataFetchingResult {
   setAttendees: React.Dispatch<React.SetStateAction<Attendee[]>>
   setHealthSystems: React.Dispatch<React.SetStateAction<HealthSystem[]>>
   setConferences: React.Dispatch<React.SetStateAction<Conference[]>>
+  setCurrentPage: React.Dispatch<React.SetStateAction<number>>
   hasMore: boolean
   currentPage: number
 }
@@ -49,11 +51,14 @@ export function useDataFetching(): UseDataFetchingResult {
   })
   const { session } = useAuth()
   
-  // Use a ref to track active fetch requests and prevent race conditions
-  const activeRequestRef = useRef<number>(0)
-  
   // Flag to track if this is the initial load
   const initialLoadRef = useRef<boolean>(true)
+  
+  // Track the last entityType fetched to detect changes
+  const lastEntityTypeRef = useRef<string | undefined>(undefined)
+
+  // Add a ref to track the last fetch request timestamp to avoid too frequent refetches
+  const lastFetchTimeRef = useRef<number>(0);
 
   // Apply filters to a query builder
   const applyFilters = useCallback((query: any, filters: FetchOptions['filters'] = [], searchTerm: string = '', tableName: string) => {
@@ -112,6 +117,11 @@ export function useDataFetching(): UseDataFetchingResult {
             query = query.ilike(property, `%${value}%`)
           }
           break
+        case 'not_contains':
+          if (value) {
+            query = query.not(property, 'ilike', `%${value}%`)
+          }
+          break
         case 'starts_with':
           if (value) {
             query = query.ilike(property, `${value}%`)
@@ -146,298 +156,480 @@ export function useDataFetching(): UseDataFetchingResult {
 
   // Memoize fetchData to prevent it from causing render loops
   const fetchData = useCallback(async (options: FetchOptions = {}) => {
-    // Create a unique request ID for this fetch operation
-    const thisRequestId = activeRequestRef.current + 1
-    activeRequestRef.current = thisRequestId
-    
-    // Only show loading indicator for initial load or when explicitly changing pages
-    const isInitialLoad = initialLoadRef.current
-    const isPageChange = options.page !== undefined && options.page !== currentPage
-    
-    if (isInitialLoad || isPageChange) {
-      setIsLoading(true)
+    const now = Date.now();
+    // Prevent rapid re-fetches (debounce mechanism)
+    if (now - lastFetchTimeRef.current < 300) {
+      console.log('Fetch request debounced, too soon after previous fetch');
+      return;
     }
+    lastFetchTimeRef.current = now;
     
+    const {
+      page = 0,
+      pageSize = 50,
+      searchTerm = '',
+      filters = [],
+      entityType,
+      listId = null
+    } = options;
+
+    // Show loading indicator
+    setIsLoading(true);
+
     try {
-      setError(null)
-
-      // If not authenticated, early return with empty data
-      if (!session) {
-        setAttendees([])
-        setConferences([])
-        setHealthSystems([])
-        setError("Authentication required to access data")
-        initialLoadRef.current = false
-        return
-      }
-
-      const { 
-        page = 0, 
-        pageSize = 50, 
-        searchTerm = '', 
-        filters = [],
-        entityType
-      } = options
-      
-      // Ensure filters is a valid array 
+      // Ensure filters is valid
       const safeFilters = Array.isArray(filters) ? filters : [];
 
-      // Calculate range for pagination
-      const from = page * pageSize
-      const to = from + pageSize - 1
-      
-      // Track all fetch promises to wait for all to complete
-      const fetchPromises: Promise<any>[] = []
+      // Initialize the pagination range
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
 
-      // Only fetch data for the requested entity type if specified
-      // Otherwise fetch all entity types (but in smaller batches)
+      // Store current entity type for the hasMore calculations
+      lastEntityTypeRef.current = entityType;
+
+      // Keep track of all data fetched during this operation
+      let fetchedAttendees: Attendee[] = [];
+      let fetchedHealthSystems: HealthSystem[] = [];
+      let fetchedConferences: Conference[] = [];
+      
+      // Fetch counts for all entity types to support hasMore calculations
+      let newTotalCounts = { ...totalCount };
+
+      // Process requests based on entity type
       if (!entityType || entityType === 'attendees') {
-        const attendeesPromise = (async () => {
-          const attendeesQuery = `
-            *,
-            health_systems (id, name, definitive_id, website, address, city, state, zip),
-            attendee_conferences (
-              conference_id,
-              conferences (
-                id,
-                name,
-                start_date,
-                end_date,
-                location
-              )
-            )
-          `
-  
-          // Get the count first
-          let countQuery = supabase
-            .from('attendees')
-            .select('*', { count: 'exact', head: true })
-          
-          // Apply filters to count query
-          countQuery = applyFilters(countQuery, safeFilters, searchTerm, 'attendees')
-          
-          const { count: attendeesCount, error: countError } = await countQuery
-  
-          if (countError) throw countError
-  
-          // Now get the actual data with pagination
-          let dataQuery = supabase
-            .from('attendees')
-            .select(attendeesQuery)
-          
-          // Apply filters to data query
-          dataQuery = applyFilters(dataQuery, safeFilters, searchTerm, 'attendees')
-            
-          // Apply pagination
-          const { data: attendeesData, error: dataError } = await dataQuery
-            .range(from, to)
-            .order('last_name', { ascending: true })
-  
-          if (dataError) throw dataError
-          
-          // Check if this request is still relevant (not superseded by a newer request)
-          if (activeRequestRef.current !== thisRequestId) return
-  
-          // Determine if there are more records
-          const hasMoreAttendees = (attendeesCount || 0) > (from + (attendeesData?.length || 0))
-  
-          // If it's the first page, replace the data; otherwise append
-          if (page === 0 || entityType) {
-            setAttendees(attendeesData || [])
-          } else {
-            setAttendees(prev => [...prev, ...(attendeesData || [])])
-          }
-  
-          // Update total count
-          setTotalCount(prev => ({ ...prev, attendees: attendeesCount || 0 }))
-          
-          // Update pagination state if we're only fetching attendees
-          if (entityType === 'attendees') {
-            setCurrentPage(page)
-            setHasMore(hasMoreAttendees)
-          }
-        })()
+        const result = await fetchAttendees({
+          from,
+          to,
+          searchTerm,
+          filters: safeFilters,
+          listId
+        });
         
-        fetchPromises.push(attendeesPromise)
+        fetchedAttendees = result.data;
+        newTotalCounts.attendees = result.count;
       }
 
       if (!entityType || entityType === 'health-systems') {
-        const healthSystemsPromise = (async () => {
-          const healthSystemsQuery = `
-            *,
-            attendees (
-              id,
-              first_name,
-              last_name,
-              title,
-              company,
-              email,
-              phone
-            )
-          `
-  
-          // Get count
-          let countQuery = supabase
-            .from('health_systems')
-            .select('*', { count: 'exact', head: true })
-            
-          // Apply filters to count query
-          countQuery = applyFilters(countQuery, safeFilters, searchTerm, 'health_systems')
-          
-          const { count: healthSystemsCount, error: countError } = await countQuery
-  
-          if (countError) throw countError
-  
-          // Get data with pagination
-          let dataQuery = supabase
-            .from('health_systems')
-            .select(healthSystemsQuery)
-            
-          // Apply filters to data query  
-          dataQuery = applyFilters(dataQuery, safeFilters, searchTerm, 'health_systems')
-            
-          // Apply pagination
-          const { data: healthSystemsData, error: dataError } = await dataQuery
-            .range(from, to)
-            .order('name', { ascending: true })
-  
-          if (dataError) throw dataError
-          
-          // Check if this request is still relevant (not superseded by a newer request)
-          if (activeRequestRef.current !== thisRequestId) return
-  
-          // Determine if there are more records
-          const hasMoreHealthSystems = (healthSystemsCount || 0) > (from + (healthSystemsData?.length || 0))
-  
-          // If it's the first page, replace the data; otherwise append
-          if (page === 0 || entityType) {
-            setHealthSystems(healthSystemsData || [])
-          } else {
-            setHealthSystems(prev => [...prev, ...(healthSystemsData || [])])
-          }
-  
-          // Update total count
-          setTotalCount(prev => ({ ...prev, healthSystems: healthSystemsCount || 0 }))
-          
-          // Update pagination state if we're only fetching health systems
-          if (entityType === 'health-systems') {
-            setCurrentPage(page)
-            setHasMore(hasMoreHealthSystems)
-          }
-        })()
+        const result = await fetchHealthSystems({
+          from,
+          to,
+          searchTerm,
+          filters: safeFilters,
+        });
         
-        fetchPromises.push(healthSystemsPromise)
+        fetchedHealthSystems = result.data;
+        newTotalCounts.healthSystems = result.count;
       }
 
       if (!entityType || entityType === 'conferences') {
-        const conferencesPromise = (async () => {
-          const conferencesQuery = `
-            *,
-            attendee_conferences (
-              id,
-              attendee_id,
-              attendees:attendees (
-                id,
-                first_name,
-                last_name,
-                title,
-                company,
-                email
-              )
-            )
-          `
-  
-          // Get count
-          let countQuery = supabase
-            .from('conferences')
-            .select('*', { count: 'exact', head: true })
-            
-          // Apply filters to count query
-          countQuery = applyFilters(countQuery, safeFilters, searchTerm, 'conferences')
-          
-          const { count: conferencesCount, error: countError } = await countQuery
-  
-          if (countError) throw countError
-  
-          // Get data with pagination
-          let dataQuery = supabase
-            .from('conferences')
-            .select(conferencesQuery)
-            
-          // Apply filters to data query
-          dataQuery = applyFilters(dataQuery, safeFilters, searchTerm, 'conferences')
-            
-          // Apply pagination
-          const { data: conferencesData, error: dataError } = await dataQuery
-            .range(from, to)
-            .order('start_date', { ascending: false })
-  
-          if (dataError) throw dataError
-          
-          // Check if this request is still relevant (not superseded by a newer request)
-          if (activeRequestRef.current !== thisRequestId) return
-          
-          // Process the data to ensure consistent structure
-          if (conferencesData) {
-            conferencesData.forEach(conf => {
-              if (conf.attendee_conferences) {
-                // Make sure all attendee_conferences have properly structured attendees data
-                conf.attendee_conferences = conf.attendee_conferences.map((ac: any) => {
-                  // Add attendee reference for backward compatibility
-                  return {
-                    ...ac,
-                    attendee: ac.attendees
-                  };
-                });
-              }
-            });
-          }
-
-          // Determine if there are more records
-          const hasMoreConferences = (conferencesCount || 0) > (from + (conferencesData?.length || 0))
-  
-          // If it's the first page, replace the data; otherwise append
-          if (page === 0 || entityType) {
-            setConferences(conferencesData || [])
-          } else {
-            setConferences(prev => [...prev, ...(conferencesData || [])])
-          }
-  
-          // Update total count
-          setTotalCount(prev => ({ ...prev, conferences: conferencesCount || 0 }))
-          
-          // Update pagination state if we're only fetching conferences
-          if (entityType === 'conferences') {
-            setCurrentPage(page)
-            setHasMore(hasMoreConferences)
-          }
-        })()
+        const result = await fetchConferences({
+          from,
+          to,
+          searchTerm,
+          filters: safeFilters,
+        });
         
-        fetchPromises.push(conferencesPromise)
+        fetchedConferences = result.data;
+        newTotalCounts.conferences = result.count;
+      }
+
+      // Update total counts first
+      setTotalCount(newTotalCounts);
+      
+      // Update current page
+      if (page !== currentPage) {
+        setCurrentPage(page);
       }
       
-      // Wait for all fetch operations to complete
-      await Promise.all(fetchPromises)
+      // Update entity data based on page
+      if (entityType === 'attendees' || !entityType) {
+        // Get current state before update
+        const currentLength = attendees.length;
+        
+        if (page === 0) {
+          // Replace mode
+          setAttendees(fetchedAttendees);
+        } else {
+          // Append mode with deduplication
+          setAttendees(prev => {
+            const combined = [...prev, ...fetchedAttendees];
+            const unique = getUniqueItemsById(combined);
+            return unique;
+          });
+        }
+        
+        // Determine hasMore for attendees
+        const hasMoreAttendees = (currentLength + fetchedAttendees.length) < newTotalCounts.attendees;
+        
+        if (entityType === 'attendees') {
+          setHasMore(hasMoreAttendees);
+        }
+      }
+      
+      if (entityType === 'health-systems' || !entityType) {
+        // Get current state before update
+        const currentLength = healthSystems.length;
+        
+        if (page === 0) {
+          // Replace mode
+          setHealthSystems(fetchedHealthSystems);
+        } else {
+          // Append mode with deduplication
+          setHealthSystems(prev => {
+            const combined = [...prev, ...fetchedHealthSystems];
+            const unique = getUniqueItemsById(combined);
+            return unique;
+          });
+        }
+        
+        // Determine hasMore for health systems
+        const hasMoreHealthSystems = (currentLength + fetchedHealthSystems.length) < newTotalCounts.healthSystems;
+        
+        if (entityType === 'health-systems') {
+          setHasMore(hasMoreHealthSystems);
+        }
+      }
+      
+      if (entityType === 'conferences' || !entityType) {
+        // Get current state before update
+        const currentLength = conferences.length;
+        
+        if (page === 0) {
+          // Replace mode
+          setConferences(fetchedConferences);
+        } else {
+          // Append mode with deduplication
+          setConferences(prev => {
+            const combined = [...prev, ...fetchedConferences];
+            const unique = getUniqueItemsById(combined);
+            return unique;
+          });
+        }
+        
+        // Determine hasMore for conferences
+        const hasMoreConferences = (currentLength + fetchedConferences.length) < newTotalCounts.conferences;
+        
+        if (entityType === 'conferences') {
+          setHasMore(hasMoreConferences);
+        }
+      }
+      
+      // If no specific entity type, set global hasMore
+      if (!entityType) {
+        // Check if any entity type has more data
+        const globalHasMore = 
+          (attendees.length + fetchedAttendees.length) < newTotalCounts.attendees ||
+          (healthSystems.length + fetchedHealthSystems.length) < newTotalCounts.healthSystems ||
+          (conferences.length + fetchedConferences.length) < newTotalCounts.conferences;
+        
+        setHasMore(globalHasMore);
+      }
 
+      // Mark initial load as complete
+      initialLoadRef.current = false;
+      
     } catch (err) {
-      // Only update error state if this is still the current request
-      if (activeRequestRef.current === thisRequestId) {
-        setError(err instanceof Error ? err.message : 'An error occurred while fetching data')
-        console.error('Error fetching data:', err)
-      }
+      console.error('Error fetching data:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred while fetching data');
     } finally {
-      // Only update loading state if this is still the current request
-      if (activeRequestRef.current === thisRequestId) {
-        setIsLoading(false)
-        initialLoadRef.current = false
-      }
+      // Always ensure loading state is reset
+      setIsLoading(false);
     }
-  }, [session, currentPage, applyFilters, setAttendees, setHealthSystems, setConferences, setCurrentPage, setHasMore, setTotalCount, setIsLoading, setError]) // Include all necessary dependencies
+  }, [applyFilters]); // Only depend on applyFilters - don't include state that changes due to this function
+
+  // Helper function to ensure unique items by id
+  const getUniqueItemsById = <T extends { id: string }>(items: T[]): T[] => {
+    const seen = new Map<string, T>();
+    items.forEach(item => {
+      if (!seen.has(item.id)) {
+        seen.set(item.id, item);
+      }
+    });
+    return Array.from(seen.values());
+  };
+
+  // Helper function to fetch attendees - refactored to return data instead of updating state
+  const fetchAttendees = async ({
+    from,
+    to,
+    searchTerm,
+    filters,
+    listId
+  }: {
+    from: number;
+    to: number;
+    searchTerm: string;
+    filters: any[];
+    listId: string | null;
+  }): Promise<{ data: Attendee[], count: number }> => {
+    try {
+      let query = `
+        *,
+        health_systems (id, name, definitive_id, website, address, city, state, zip),
+        attendee_conferences (
+          conference_id,
+          conferences (
+            id,
+            name,
+            start_date,
+            end_date,
+            location
+          )
+        )
+      `;
+
+      // Add attendee_lists join if filtering by list
+      if (listId) {
+        query = `
+          *,
+          health_systems (id, name, definitive_id, website, address, city, state, zip),
+          attendee_conferences (
+            conference_id,
+            conferences (
+              id,
+              name,
+              start_date,
+              end_date,
+              location
+            )
+          ),
+          attendee_lists!inner (
+            id,
+            list_id
+          )
+        `;
+      }
+
+      // Get count
+      let countQuery = supabase
+        .from('attendees')
+        .select('*', { count: 'exact', head: true });
+      
+      // Add list filter if listId is provided
+      if (listId) {
+        // For count query with list filter, we need to use a different approach
+        countQuery = supabase
+          .from('attendee_lists')
+          .select('attendee_id', { count: 'exact', head: true })
+          .eq('list_id', listId);
+      }
+      
+      // Apply filters to count query if not using listId
+      // (we can't apply complex filters to the join count query)
+      if (!listId) {
+        countQuery = applyFilters(countQuery, filters, searchTerm, 'attendees');
+      }
+      
+      const { count: attendeesCount, error: countError } = await countQuery;
+
+      if (countError) throw countError;
+
+      // Now get the actual data with pagination
+      let dataQuery = supabase
+        .from('attendees')
+        .select(query);
+      
+      // Apply list filter if listId is provided
+      if (listId) {
+        dataQuery = dataQuery.eq('attendee_lists.list_id', listId);
+      }
+      
+      // Apply filters to data query
+      dataQuery = applyFilters(dataQuery, filters, searchTerm, 'attendees');
+        
+      // Apply pagination
+      const { data: attendeesData, error: dataError } = await dataQuery
+        .range(from, to)
+        .order('last_name', { ascending: true });
+
+      if (dataError) throw dataError;
+
+      // Helper function to validate attendee data
+      const isValidAttendeeArray = (data: any): data is Attendee[] => {
+        return Array.isArray(data) && data.every(item => 
+          item && typeof item === 'object' && 'id' in item
+        );
+      };
+
+      // Return the validated data and count
+      return {
+        data: isValidAttendeeArray(attendeesData) ? attendeesData : [],
+        count: attendeesCount || 0
+      };
+    } catch (error) {
+      console.error('Error fetching attendees:', error);
+      return { data: [], count: 0 };
+    }
+  };
+
+  // Helper function to fetch health systems - refactored to return data instead of updating state
+  const fetchHealthSystems = async ({
+    from,
+    to,
+    searchTerm,
+    filters
+  }: {
+    from: number;
+    to: number;
+    searchTerm: string;
+    filters: any[];
+  }): Promise<{ data: HealthSystem[], count: number }> => {
+    try {
+      const healthSystemsQuery = `
+        *,
+        attendees (
+          id,
+          first_name,
+          last_name,
+          title,
+          company,
+          email,
+          phone
+        )
+      `;
+
+      // Get count
+      let countQuery = supabase
+        .from('health_systems')
+        .select('*', { count: 'exact', head: true });
+        
+      // Apply filters to count query
+      countQuery = applyFilters(countQuery, filters, searchTerm, 'health_systems');
+      
+      const { count: healthSystemsCount, error: countError } = await countQuery;
+
+      if (countError) throw countError;
+
+      // Get data with pagination
+      let dataQuery = supabase
+        .from('health_systems')
+        .select(healthSystemsQuery);
+        
+      // Apply filters to data query  
+      dataQuery = applyFilters(dataQuery, filters, searchTerm, 'health_systems');
+        
+      // Apply pagination
+      const { data: healthSystemsData, error: dataError } = await dataQuery
+        .range(from, to)
+        .order('name', { ascending: true });
+
+      if (dataError) throw dataError;
+
+      // Helper function to validate health system data
+      const isValidHealthSystemArray = (data: any): data is HealthSystem[] => {
+        return Array.isArray(data) && data.every(item => 
+          item && typeof item === 'object' && 'id' in item
+        );
+      };
+
+      // Return the validated data and count
+      return {
+        data: isValidHealthSystemArray(healthSystemsData) ? healthSystemsData : [],
+        count: healthSystemsCount || 0
+      };
+    } catch (error) {
+      console.error('Error fetching health systems:', error);
+      return { data: [], count: 0 };
+    }
+  };
+
+  // Helper function to fetch conferences - refactored to return data instead of updating state
+  const fetchConferences = async ({
+    from,
+    to,
+    searchTerm,
+    filters,
+  }: {
+    from: number;
+    to: number;
+    searchTerm: string;
+    filters: any[];
+  }): Promise<{ data: Conference[], count: number }> => {
+    try {
+      const conferencesQuery = `
+        *,
+        attendee_conferences (
+          id,
+          attendee_id,
+          attendees:attendees (
+            id,
+            first_name,
+            last_name,
+            title,
+            company,
+            email
+          )
+        )
+      `;
+
+      // Get count
+      let countQuery = supabase
+        .from('conferences')
+        .select('*', { count: 'exact', head: true });
+        
+      // Apply filters to count query
+      countQuery = applyFilters(countQuery, filters, searchTerm, 'conferences');
+      
+      const { count: conferencesCount, error: countError } = await countQuery;
+
+      if (countError) throw countError;
+
+      // Get data with pagination
+      let dataQuery = supabase
+        .from('conferences')
+        .select(conferencesQuery);
+        
+      // Apply filters to data query
+      dataQuery = applyFilters(dataQuery, filters, searchTerm, 'conferences');
+        
+      // Apply pagination
+      const { data: conferencesData, error: dataError } = await dataQuery
+        .range(from, to)
+        .order('start_date', { ascending: false });
+
+      if (dataError) throw dataError;
+      
+      // Process the data to ensure consistent structure
+      if (conferencesData) {
+        conferencesData.forEach(conf => {
+          if (conf.attendee_conferences) {
+            // Make sure all attendee_conferences have properly structured attendees data
+            conf.attendee_conferences = conf.attendee_conferences.map((ac: any) => {
+              // Add attendee reference for backward compatibility
+              return {
+                ...ac,
+                attendee: ac.attendees
+              };
+            });
+          }
+        });
+      }
+
+      // Helper function to validate conference data
+      const isValidConferenceArray = (data: any): data is Conference[] => {
+        return Array.isArray(data) && data.every(item => 
+          item && typeof item === 'object' && 'id' in item
+        );
+      };
+
+      // Return the validated data and count
+      return {
+        data: isValidConferenceArray(conferencesData) ? conferencesData : [],
+        count: conferencesCount || 0
+      };
+    } catch (error) {
+      console.error('Error fetching conferences:', error);
+      return { data: [], count: 0 };
+    }
+  };
 
   // Initial data fetch on mount and auth state change
   useEffect(() => {
-    fetchData()
-  }, [fetchData]) // Include fetchData in the dependency array since it's now memoized
+    if (session) {
+      console.log('Initial data fetch triggered by session change');
+      fetchData();
+    }
+  }, [fetchData, session]);
 
   return {
     attendees,
@@ -450,6 +642,7 @@ export function useDataFetching(): UseDataFetchingResult {
     setAttendees,
     setHealthSystems,
     setConferences,
+    setCurrentPage,
     hasMore,
     currentPage
   }

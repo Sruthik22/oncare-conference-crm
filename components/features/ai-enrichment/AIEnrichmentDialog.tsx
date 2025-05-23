@@ -1,8 +1,9 @@
 import React, { useState, Fragment, FormEvent, useRef, useEffect } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
-import { XMarkIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, SparklesIcon, BookmarkIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
 import { aiService } from '@/lib/ai'
+import { aiPromptsService, AIPrompt } from '@/lib/aiPrompts'
 import { definitiveService } from '@/lib/definitive'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { Attendee, HealthSystem, Conference } from '@/types'
@@ -11,6 +12,7 @@ import { getColumnIconName } from '@/hooks/useColumnManagement'
 import { Icon } from '@/components/ui/Icon'
 import { getIconComponent } from '@/utils/iconUtils'
 import { Switch } from '@headlessui/react'
+import { SavePromptDialog } from './SavePromptDialog'
 
 // TODO: get icon path from iconUtils
 // Helper function to get icon SVG path based on icon name
@@ -100,8 +102,16 @@ export function AIEnrichmentDialog({
   const [cancelRequested, setCancelRequested] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   
+  // Saved prompts state
+  const [savedPrompts, setSavedPrompts] = useState<AIPrompt[]>([])
+  const [isLoadingPrompts, setIsLoadingPrompts] = useState(false)
+  const [selectedPromptId, setSelectedPromptId] = useState<string>('')
+  const [showSavePromptDialog, setShowSavePromptDialog] = useState(false)
+  const [showPromptDropdown, setShowPromptDropdown] = useState(false)
+  
   const editorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const promptDropdownRef = useRef<HTMLDivElement>(null)
   
   // Get available variables from allColumns
   const availableVariables = allColumns.map(column => String(column.id));
@@ -156,6 +166,124 @@ export function AIEnrichmentDialog({
       }
     };
   }, []);
+
+  // Handle fetching Definitive data summary when toggle is enabled
+  useEffect(() => {
+    if (includeDefinitiveData) {
+      fetchDefinitiveDataSummary();
+    }
+  }, [includeDefinitiveData]);
+
+  // Load saved prompts when dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      loadSavedPrompts();
+    }
+  }, [isOpen]);
+
+  // Close prompt dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        promptDropdownRef.current && 
+        !promptDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowPromptDropdown(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Load saved prompts from database
+  const loadSavedPrompts = async () => {
+    try {
+      setIsLoadingPrompts(true);
+      const prompts = await aiPromptsService.getAllPrompts();
+      setSavedPrompts(prompts);
+    } catch (error) {
+      console.error('Error loading saved prompts:', error);
+    } finally {
+      setIsLoadingPrompts(false);
+    }
+  };
+
+  // Handle selecting a saved prompt
+  const handleSelectSavedPrompt = (prompt: AIPrompt) => {
+    // Set the column type
+    setColumnType(prompt.column_type);
+    
+    // Clear the editor and populate with the saved prompt template
+    if (editorRef.current) {
+      editorRef.current.innerHTML = '';
+      
+      // Parse the prompt template and populate the editor
+      populateEditorWithTemplate(prompt.prompt_template);
+    }
+    
+    setSelectedPromptId(prompt.id);
+    setShowPromptDropdown(false);
+  };
+
+  // Populate editor with a template string, converting {{variable}} to variable tags
+  const populateEditorWithTemplate = (template: string) => {
+    if (!editorRef.current) return;
+    
+    // Clear editor
+    editorRef.current.innerHTML = '';
+    
+    // Split template by variable patterns
+    const parts = template.split(/(\{\{[^}]+\}\})/);
+    
+    parts.forEach(part => {
+      if (!editorRef.current) return; // Additional safety check
+      
+      if (part.match(/^\{\{[^}]+\}\}$/)) {
+        // This is a variable - create a variable tag
+        const variableName = part.slice(2, -2); // Remove {{ and }}
+        
+        // Create variable tag element
+        const varTag = document.createElement('span');
+        varTag.className = 'inline-flex items-center mx-0.5 px-2 py-0.5 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800 variable-tag';
+        varTag.contentEditable = 'false';
+        varTag.setAttribute('data-variable', variableName);
+        
+        // Create icon element
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'mr-1 h-3.5 w-3.5 inline-block';
+        iconSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 text-indigo-600"><path d="${getIconPath(getColumnIconName(variableName))}"></path></svg>`;
+        
+        // Add icon and text to the variable tag
+        varTag.appendChild(iconSpan);
+        varTag.appendChild(document.createTextNode(variableName));
+        
+        editorRef.current.appendChild(varTag);
+      } else if (part) {
+        // This is regular text
+        const textNode = document.createTextNode(part);
+        editorRef.current.appendChild(textNode);
+      }
+    });
+  };
+
+  // Handle saving a new prompt
+  const handleSavePrompt = () => {
+    const promptTemplate = getPromptTemplate();
+    if (!promptTemplate.trim()) {
+      setError('Please enter a prompt template before saving');
+      return;
+    }
+    setShowSavePromptDialog(true);
+  };
+
+  // Handle successful prompt save
+  const handlePromptSaved = (savedPrompt: AIPrompt) => {
+    setSavedPrompts(prev => [savedPrompt, ...prev]);
+    setSelectedPromptId(savedPrompt.id);
+  };
 
   // Extract text from editor including variables
   const getPromptTemplate = () => {
@@ -643,13 +771,6 @@ export function AIEnrichmentDialog({
     return null;
   };
 
-  // Handle fetching Definitive data summary when toggle is enabled
-  useEffect(() => {
-    if (includeDefinitiveData) {
-      fetchDefinitiveDataSummary();
-    }
-  }, [includeDefinitiveData]);
-
   // Fetch a summary of available Definitive data
   const fetchDefinitiveDataSummary = async () => {
     if (!includeDefinitiveData) return;
@@ -881,6 +1002,109 @@ export function AIEnrichmentDialog({
                                 <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                               </svg>
                             </div>
+                          </div>
+                        </div>
+                        
+                        {/* Saved Prompts Section */}
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-medium text-gray-700">
+                              Saved Prompts
+                            </label>
+                            <button
+                              type="button"
+                              onClick={handleSavePrompt}
+                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none"
+                            >
+                              <BookmarkIcon className="h-3 w-3 mr-1" />
+                              Save Current
+                            </button>
+                          </div>
+                          
+                          <div className="relative" ref={promptDropdownRef}>
+                            <button
+                              type="button"
+                              onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                              className="relative w-full cursor-default rounded-md bg-white py-2.5 pl-3 pr-10 text-left border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                              disabled={isLoadingPrompts}
+                            >
+                              <span className="block truncate">
+                                {isLoadingPrompts ? (
+                                  'Loading prompts...'
+                                ) : selectedPromptId ? (
+                                  savedPrompts.find(p => p.id === selectedPromptId)?.name || 'Select a saved prompt...'
+                                ) : (
+                                  'Select a saved prompt...'
+                                )}
+                              </span>
+                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                <ChevronDownIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                              </span>
+                            </button>
+                            
+                            {showPromptDropdown && (
+                              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
+                                <div
+                                  className="relative cursor-pointer select-none py-3 pl-3 pr-9 text-gray-900 hover:bg-indigo-50"
+                                  onClick={() => {
+                                    setSelectedPromptId('');
+                                    if (editorRef.current) {
+                                      editorRef.current.innerHTML = '';
+                                    }
+                                    setShowPromptDropdown(false);
+                                  }}
+                                >
+                                  <span className="block truncate font-normal text-gray-500">
+                                    Write custom prompt...
+                                  </span>
+                                </div>
+                                
+                                {savedPrompts.length === 0 ? (
+                                  <div className="relative cursor-default select-none py-2 pl-3 pr-9 text-gray-500">
+                                    No saved prompts yet
+                                  </div>
+                                ) : (
+                                  savedPrompts.map((prompt) => (
+                                    <div
+                                      key={prompt.id}
+                                      className={`relative cursor-pointer select-none py-3 pl-3 pr-9 flex items-center ${
+                                        selectedPromptId === prompt.id ? 'bg-indigo-100 text-indigo-900' : 'text-gray-900 hover:bg-indigo-50'
+                                      }`}
+                                      onClick={() => handleSelectSavedPrompt(prompt)}
+                                    >
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center">
+                                          <span className={`truncate ${selectedPromptId === prompt.id ? 'font-semibold' : 'font-normal'}`}>
+                                            {prompt.name}
+                                          </span>
+                                          {prompt.is_default && (
+                                            <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                              Default
+                                            </span>
+                                          )}
+                                        </div>
+                                        {prompt.description && (
+                                          <div className="text-xs text-gray-500 truncate mt-1">
+                                            {prompt.description}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="ml-3 flex-shrink-0">
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${
+                                          prompt.column_type === 'boolean' 
+                                            ? 'bg-green-100 text-green-800'
+                                            : prompt.column_type === 'number'
+                                            ? 'bg-purple-100 text-purple-800'
+                                            : 'bg-gray-100 text-gray-800'
+                                        }`}>
+                                          {prompt.column_type}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                         
@@ -1120,6 +1344,16 @@ export function AIEnrichmentDialog({
                     </div>
                   </div>
                 )}
+                
+                {/* Save Prompt Dialog */}
+                <SavePromptDialog
+                  isOpen={showSavePromptDialog}
+                  onClose={() => setShowSavePromptDialog(false)}
+                  onSave={handlePromptSaved}
+                  promptTemplate={getPromptTemplate()}
+                  columnType={columnType as 'text' | 'boolean' | 'number'}
+                  initialName={columnName}
+                />
               </Dialog.Panel>
             </Transition.Child>
           </div>
